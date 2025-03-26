@@ -10,6 +10,8 @@ import time
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+import ftplib
+import requests
 
 from redflow.utils.logger import get_module_logger
 from redflow.utils.helpers import run_tool
@@ -299,7 +301,8 @@ class Enumeration:
                 "directories": [],
                 "files": [],
                 "tech": [],
-                "vhosts": []
+                "vhosts": [],
+                "downloaded_files": []  # Track downloaded files
             }
             
             # Run gobuster to discover hidden directories and pages
@@ -322,6 +325,7 @@ class Enumeration:
                 continue
             
             # Run gobuster
+            self.logger.info(f"Running gobuster against {target_url}")
             cmd = [
                 "gobuster", "dir",
                 "-u", target_url,
@@ -351,20 +355,187 @@ class Enumeration:
                                     web_info["directories"].append(path)
                                 else:
                                     web_info["files"].append(path)
+                                    
+                    self.logger.info(f"Found {len(web_info['directories'])} directories and {len(web_info['files'])} files")
             
             # Run nikto for vulnerability scanning
             nikto_output = self.config.get_output_file(f"nikto_{port}", "txt")
             
+            self.logger.info(f"Running nikto vulnerability scan against {target_url}")
             cmd = ["nikto", "-h", target_url, "-o", nikto_output]
+            
+            # If HTTPS, add parameter to skip SSL verification
+            if is_https:
+                cmd.extend(["-ssl"])
             
             result = run_tool(cmd, timeout=600)
             
             if result["returncode"] == 0:
                 self.logger.debug(f"Nikto results saved in: {nikto_output}")
+                # Parse nikto results to find additional files or vulnerabilities
+                if os.path.exists(nikto_output):
+                    with open(nikto_output, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                        for line in lines:
+                            # Extract file paths from nikto output
+                            if "OSVDB" in line and ":" in line:
+                                parts = line.split(":", 2)
+                                if len(parts) > 2:
+                                    message = parts[2].strip()
+                                    # Extract paths found
+                                    path_match = re.search(r'/([\w\-\.\/]+)', message)
+                                    if path_match and path_match.group(0) not in web_info["files"]:
+                                        web_info["files"].append(path_match.group(0))
             
+            # Try to check for robots.txt and sitemap.xml
+            common_files = ["robots.txt", "sitemap.xml", ".htaccess", "crossdomain.xml"]
+            for file in common_files:
+                file_url = f"{target_url}{file}"
+                try:
+                    resp = requests.get(file_url, verify=False, timeout=5)
+                    if resp.status_code == 200:
+                        file_path = f"/{file}"
+                        if file_path not in web_info["files"]:
+                            self.logger.info(f"Found common file: {file_path}")
+                            web_info["files"].append(file_path)
+                            
+                            # Parse robots.txt for additional paths
+                            if file == "robots.txt":
+                                for line in resp.text.splitlines():
+                                    if "Disallow:" in line:
+                                        path = line.split("Disallow:", 1)[1].strip()
+                                        if path and path not in web_info["files"] and path not in web_info["directories"]:
+                                            if path.endswith("/"):
+                                                web_info["directories"].append(path)
+                                            else:
+                                                web_info["files"].append(path)
+                except:
+                    pass
+                
+            # Check for interesting files in root directory
+            interesting_paths = [
+                "/backup", "/admin", "/login", "/config", "/dashboard", 
+                "/wp-admin", "/wp-login.php", "/wp-config.php", "/config.php",
+                "/administrator", "/phpmyadmin", "/secret"
+            ]
+            
+            for path in interesting_paths:
+                path_url = f"{target_url.rstrip('/')}{path}"
+                try:
+                    resp = requests.get(path_url, verify=False, timeout=5)
+                    if resp.status_code != 404:
+                        if path.endswith("/") or "." not in path:
+                            if path not in web_info["directories"]:
+                                self.logger.info(f"Found interesting directory: {path}")
+                                web_info["directories"].append(path)
+                        else:
+                            if path not in web_info["files"]:
+                                self.logger.info(f"Found interesting file: {path}")
+                                web_info["files"].append(path)
+                except:
+                    pass
+            
+            # Initialize downloader and download interesting files if available
+            if hasattr(self, 'downloader') and self.downloader:
+                # Download interesting files found
+                self._download_interesting_web_files(self.target, port, web_info)
+                
+            # Add this result to the list of web results
             web_results.append(web_info)
         
         self.results["web"] = web_results
+        
+        # Display information about downloaded files
+        for web_result in web_results:
+            downloaded = web_result.get("downloaded_files", [])
+            if downloaded:
+                port = web_result.get("port")
+                protocol = web_result.get("protocol")
+                self.logger.info(f"Downloaded {len(downloaded)} files from {protocol}://{self.target}:{port}")
+                for dl_file in downloaded:
+                    url = dl_file.get("url", "unknown")
+                    local_path = dl_file.get("local_path", "unknown")
+                    self.logger.info(f"  - {os.path.basename(local_path)} from {url}")
+                    
+                self.console.print(f"[green]Downloaded {len(downloaded)} files from {protocol}://{self.target}:{port}[/green]")
+                self.console.print(f"Files saved in: {os.path.dirname(downloaded[0]['local_path'])}")
+    
+    def _download_interesting_web_files(self, host, port, web_info):
+        """
+        Download interesting files found during web enumeration
+        
+        Args:
+            host (str): Web server host
+            port (int): Web server port
+            web_info (dict): Web information dictionary to update
+        """
+        # Create a specific directory for web downloads
+        target_dir = self.downloader.create_directory_for_downloads(web_info["protocol"], port)
+        
+        # Define interesting file extensions to download
+        interesting_extensions = [
+            ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", 
+            ".conf", ".config", ".ini", ".log", ".bak", ".backup",
+            ".sql", ".db", ".xml", ".json", ".php", ".asp", ".jsp",
+            ".zip", ".tar", ".gz", ".rar"
+        ]
+        
+        protocol = web_info["protocol"]
+        base_url = f"{protocol}://{host}:{port}"
+        
+        # Check each file
+        for file_path in web_info["files"]:
+            # Ensure path starts with /
+            if not file_path.startswith("/"):
+                file_path = "/" + file_path
+                
+            file_url = f"{base_url}{file_path}"
+            filename = os.path.basename(file_path)
+            extension = os.path.splitext(filename)[1].lower()
+            
+            # Only download files with interesting extensions or interesting names
+            interesting_keywords = ["password", "admin", "user", "config", "backup", "secret", "key", "db"]
+            
+            if extension in interesting_extensions or any(keyword in filename.lower() for keyword in interesting_keywords):
+                try:
+                    self.logger.info(f"Downloading interesting web file: {file_url}")
+                    
+                    # Download the file
+                    result = self.downloader.download_http_file(
+                        url=file_url,
+                        target_dir=target_dir,
+                        verify=False
+                    )
+                    
+                    if result:
+                        web_info["downloaded_files"].append({
+                            "url": file_url,
+                            "local_path": result
+                        })
+                        
+                except Exception as e:
+                    self.logger.error(f"Error downloading web file {file_url}: {str(e)}")
+                    
+        # If we have found directories, also try to find index files inside them
+        for dir_path in web_info["directories"]:
+            # Ensure path starts with / and ends with /
+            if not dir_path.startswith("/"):
+                dir_path = "/" + dir_path
+            if not dir_path.endswith("/"):
+                dir_path = dir_path + "/"
+                
+            # Try common index files
+            index_files = ["index.html", "index.php", "default.asp", "index.jsp", "default.html"]
+            for index_file in index_files:
+                file_url = f"{base_url}{dir_path}{index_file}"
+                try:
+                    resp = requests.head(file_url, verify=False, timeout=5)
+                    if resp.status_code == 200:
+                        self.logger.info(f"Found index file: {dir_path}{index_file}")
+                        # Don't need to download index files specifically
+                        break
+                except:
+                    pass
     
     def _enumerate_ssh(self, ssh_services):
         """
@@ -562,3 +733,235 @@ class Enumeration:
                     self.console.print(f"  Default credentials: {default_creds}")
         
         self.console.print("")  # Extra space 
+
+    def _enumerate_ftp(self, host, port=21, service_info=None):
+        """
+        Enumerate an FTP server
+        
+        Args:
+            host (str): Target host
+            port (int): Target port
+            service_info (dict, optional): Service info from Nmap
+            
+        Returns:
+            dict: FTP enumeration results
+        """
+        ftp_info = {
+            "port": port,
+            "name": "ftp",
+            "anonymous_access": False,
+            "directories": [],
+            "files": [],
+            "downloaded_files": []
+        }
+        
+        # Add service version if available
+        if service_info and "version" in service_info:
+            ftp_info["version"] = service_info["version"]
+        
+        try:
+            # Try anonymous login
+            self.logger.info(f"Attempting anonymous FTP login to {host}:{port}")
+            ftp = ftplib.FTP()
+            ftp.connect(host, port)
+            ftp.login("anonymous", "anonymous@example.com")
+            
+            # If we got here, anonymous login succeeded
+            ftp_info["anonymous_access"] = True
+            self.logger.warning(f"Anonymous FTP access allowed on {host}:{port}")
+            
+            # List root directory
+            self._list_ftp_directory(ftp, "/", ftp_info)
+            
+            # Download interesting files if found and downloader is available
+            if hasattr(self, 'downloader') and self.downloader:
+                self._download_interesting_ftp_files(host, port, ftp_info)
+            
+            ftp.quit()
+            
+        except ftplib.all_errors as e:
+            self.logger.info(f"FTP enumeration error for {host}:{port}: {str(e)}")
+        
+        return ftp_info
+    
+    def _list_ftp_directory(self, ftp, directory, ftp_info, max_depth=2, current_depth=0):
+        """
+        Recursively list FTP directories
+        
+        Args:
+            ftp (ftplib.FTP): FTP connection
+            directory (str): Current directory to list
+            ftp_info (dict): FTP information dictionary to update
+            max_depth (int): Maximum recursion depth
+            current_depth (int): Current recursion depth
+        """
+        if current_depth > max_depth:
+            return
+            
+        try:
+            original_dir = ftp.pwd()
+            
+            # Try to change to directory
+            ftp.cwd(directory)
+            current_dir = ftp.pwd()
+            
+            # Add directory to list if not already there
+            if current_dir not in ftp_info["directories"]:
+                ftp_info["directories"].append(current_dir)
+            
+            # List files and directories
+            file_list = []
+            ftp.retrlines('LIST', file_list.append)
+            
+            for item in file_list:
+                parts = item.split()
+                if len(parts) < 9:
+                    continue
+                    
+                # Check if it's a directory
+                is_dir = parts[0].startswith('d')
+                filename = " ".join(parts[8:])
+                
+                if is_dir and current_depth < max_depth:
+                    # Recursively list subdirectory
+                    new_dir = f"{current_dir}/{filename}" if current_dir != "/" else f"/{filename}"
+                    self._list_ftp_directory(ftp, new_dir, ftp_info, max_depth, current_depth + 1)
+                else:
+                    # It's a file, add to file list
+                    file_path = f"{current_dir}/{filename}" if current_dir != "/" else f"/{filename}"
+                    ftp_info["files"].append(file_path)
+            
+            # Return to original directory
+            ftp.cwd(original_dir)
+            
+        except ftplib.all_errors as e:
+            self.logger.debug(f"Error listing FTP directory {directory}: {str(e)}")
+
+    def _download_interesting_ftp_files(self, host, port, ftp_info):
+        """
+        Download interesting files from FTP server
+        
+        Args:
+            host (str): FTP server host
+            port (int): FTP server port
+            ftp_info (dict): FTP information dictionary to update
+        """
+        # Create a specific directory for FTP downloads
+        target_dir = self.downloader.create_directory_for_downloads("ftp", port)
+        
+        # Define interesting file patterns
+        interesting_extensions = [
+            ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", 
+            ".conf", ".config", ".ini", ".log", ".bak", ".backup",
+            ".sql", ".db", ".php", ".asp", ".aspx", ".jsp", ".cgi"
+        ]
+        
+        interesting_filenames = [
+            "passwd", "password", "credentials", "users", "admin",
+            "config", "settings", "database", "backup", "README"
+        ]
+        
+        # Check each file
+        for file_path in ftp_info["files"]:
+            filename = os.path.basename(file_path)
+            extension = os.path.splitext(filename)[1].lower()
+            
+            # Check if file matches our criteria
+            is_interesting = False
+            
+            if extension in interesting_extensions:
+                is_interesting = True
+                
+            for pattern in interesting_filenames:
+                if pattern.lower() in filename.lower():
+                    is_interesting = True
+                    break
+                    
+            if is_interesting:
+                # Try to download the file
+                try:
+                    self.logger.info(f"Downloading interesting FTP file: {file_path}")
+                    
+                    # Try anonymous login first
+                    result = self.downloader.download_ftp_file(
+                        host=host,
+                        remote_path=file_path,
+                        target_dir=target_dir
+                    )
+                    
+                    if result:
+                        ftp_info["downloaded_files"].append({
+                            "remote_path": file_path,
+                            "local_path": result
+                        })
+                        
+                except Exception as e:
+                    self.logger.error(f"Error downloading FTP file {file_path}: {str(e)}")
+
+    def enumerate_services(self, target, services, output_dir):
+        """
+        Enumerate discovered services
+        
+        Args:
+            target (str): Target to scan
+            services (list): List of services to enumerate
+            output_dir (str): Output directory for results
+            
+        Returns:
+            dict: Enumeration results
+        """
+        self.logger.info(f"Starting service enumeration for {target}")
+        
+        # Initialize downloader if not present
+        if not hasattr(self, 'downloader'):
+            from redflow.utils.downloader import FileDownloader
+            self.downloader = FileDownloader(output_dir, self.logger, self.console)
+        
+        enumeration_results = {}
+        service_types = self._group_services_by_type(services)
+        
+        # Log what we're enumerating
+        for service_type, instances in service_types.items():
+            self.logger.info(f"Will enumerate {len(instances)} {service_type} service(s)")
+        
+        # FTP enumeration
+        if "ftp" in service_types:
+            ftp_task = progress.add_task("[cyan]Performing FTP enumeration...", total=1)
+            self._enumerate_ftp(service_types["ftp"])
+            progress.update(ftp_task, completed=1)
+        
+        # SMB/Windows enumeration
+        if "smb" in service_types or "microsoft-ds" in service_types:
+            smb_task = progress.add_task("[cyan]Performing SMB/Windows enumeration...", total=1)
+            smb_services = service_types.get("smb", []) + service_types.get("microsoft-ds", [])
+            self._enumerate_smb(smb_services)
+            progress.update(smb_task, completed=1)
+        
+        # Web service enumeration
+        if "http" in service_types or "https" in service_types:
+            web_task = progress.add_task("[cyan]Performing Web service enumeration...", total=1)
+            web_services = service_types.get("http", []) + service_types.get("https", [])
+            self._enumerate_web(web_services)
+            progress.update(web_task, completed=1)
+        
+        # SSH enumeration
+        if "ssh" in service_types:
+            ssh_task = progress.add_task("[cyan]Performing SSH enumeration...", total=1)
+            self._enumerate_ssh(service_types["ssh"])
+            progress.update(ssh_task, completed=1)
+        
+        # Database enumeration
+        db_services = []
+        for db_type in ["mysql", "postgresql", "mssql", "oracle"]:
+            if db_type in service_types:
+                db_services.extend(service_types[db_type])
+        
+        if db_services:
+            db_task = progress.add_task("[cyan]Performing database enumeration...", total=1)
+            self._enumerate_databases(db_services)
+            progress.update(db_task, completed=1)
+        
+        # After all enumerations are completed
+        self._show_results_summary()
+        
+        return self.results 
