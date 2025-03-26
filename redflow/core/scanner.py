@@ -228,11 +228,20 @@ class Scanner:
             open_ports_table.add_column("Version", style="yellow")
             
             for port_info in self.results["open_ports"]:
-                open_ports_table.add_row(
-                    str(port_info["port"]), 
-                    port_info.get("service", "Unknown"),
-                    port_info.get("version", "")
-                )
+                if isinstance(port_info, str):
+                    # If port is a string, just display the port number
+                    open_ports_table.add_row(
+                        port_info,
+                        "Unknown",
+                        ""
+                    )
+                else:
+                    # If port is a dictionary, extract data
+                    open_ports_table.add_row(
+                        str(port_info.get("port", "?")), 
+                        port_info.get("service", "Unknown"),
+                        port_info.get("version", "")
+                    )
             
             self.console.print(open_ports_table)
         
