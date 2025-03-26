@@ -511,9 +511,20 @@ class ReportGenerator:
             sensitive_ports = [21, 22, 23, 3389, 5900]
             exposed_sensitive = []
             for port in open_ports:
-                port_num = port.get("port")
-                if port_num in sensitive_ports:
-                    exposed_sensitive.append(port_num)
+                if isinstance(port, str):
+                    # If port is a string, try to convert it to integer
+                    try:
+                        port_num = int(port)
+                        if port_num in sensitive_ports:
+                            exposed_sensitive.append(port_num)
+                    except ValueError:
+                        # Skip if port string can't be converted to integer
+                        pass
+                else:
+                    # If port is a dictionary, extract the port number
+                    port_num = port.get("port")
+                    if port_num in sensitive_ports:
+                        exposed_sensitive.append(port_num)
             
             if exposed_sensitive:
                 port_str = ", ".join([str(p) for p in exposed_sensitive])
