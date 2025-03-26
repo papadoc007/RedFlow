@@ -1183,3 +1183,124 @@ class Enumeration:
             error_msg = "No file path or URL provided"
             self.console.print(f"[red]{error_msg}[/red]")
             return error_msg 
+
+    def interactive_download_files(self, target=None, port=80, protocol="http"):
+        """
+        Interactive file download - allows user to select which discovered files to download
+        
+        Args:
+            target (str, optional): Target host (if different from current target)
+            port (int or str): Port of the web service
+            protocol (str): Protocol (http or https)
+            
+        Returns:
+            list: List of downloaded file paths
+        """
+        if target is None:
+            target = self.target
+
+        port_str = str(port)
+        downloaded_files = []
+        
+        # Get the web service results for the specified port
+        web_files = []
+        web_dirs = []
+        
+        if isinstance(self.results["web"], list):
+            for web_service in self.results["web"]:
+                if str(web_service.get("port", "")) == port_str and web_service.get("protocol", "") == protocol:
+                    web_files = web_service.get("files", [])
+                    web_dirs = web_service.get("directories", [])
+                    break
+        
+        if not web_files and not web_dirs:
+            self.console.print("[yellow]No files or directories discovered on this port[/yellow]")
+            return downloaded_files
+        
+        # Initialize downloader if not present
+        if not hasattr(self, 'downloader'):
+            from redflow.utils.downloader import FileDownloader
+            self.downloader = FileDownloader(self.config.output_dir, self.logger, self.console)
+        
+        # Display available files
+        self.console.print(f"\n[bold cyan]Files discovered on {protocol}://{target}:{port_str}[/bold cyan]")
+        
+        all_paths = []
+        
+        if web_files:
+            self.console.print(f"\n[bold green]Files ({len(web_files)}):[/bold green]")
+            for i, file in enumerate(web_files, 1):
+                self.console.print(f"  {i}. {file}")
+                all_paths.append({"type": "file", "path": file})
+        
+        if web_dirs:
+            self.console.print(f"\n[bold green]Directories ({len(web_dirs)}):[/bold green]")
+            for i, directory in enumerate(web_dirs, len(web_files) + 1):
+                self.console.print(f"  {i}. {directory}")
+                all_paths.append({"type": "directory", "path": directory})
+        
+        # Ask user which files to download
+        self.console.print("\n[bold]Enter the numbers of files/directories to download (comma-separated, 'all' for all files, or 'none' to skip):[/bold]")
+        
+        # Interactive mode requires input from user
+        try:
+            selection = input("> ").strip().lower()
+            
+            if selection == "all":
+                indices = list(range(1, len(all_paths) + 1))
+            elif selection == "none" or not selection:
+                self.console.print("[yellow]No files selected for download[/yellow]")
+                return downloaded_files
+            else:
+                # Parse user selection
+                try:
+                    indices = [int(idx.strip()) for idx in selection.split(",") if idx.strip()]
+                except ValueError:
+                    self.console.print("[red]Invalid input. Please enter numbers separated by commas.[/red]")
+                    return downloaded_files
+            
+            # Download selected files
+            base_url = f"{protocol}://{target}:{port_str}"
+            
+            for idx in indices:
+                if 1 <= idx <= len(all_paths):
+                    item = all_paths[idx - 1]
+                    path = item["path"]
+                    item_type = item["type"]
+                    
+                    # Create the full URL
+                    url = f"{base_url}{path}"
+                    
+                    if item_type == "file":
+                        self.console.print(f"[bold]Downloading file: [blue]{path}[/blue]...[/bold]")
+                        result = self.downloader.download_http_file(
+                            url=url,
+                            target_dir=None,  # Use default directory
+                            verify=False
+                        )
+                        
+                        if result:
+                            downloaded_files.append(result)
+                            self.console.print(f"[green]Downloaded to:[/green] {result}")
+                        else:
+                            self.console.print(f"[red]Failed to download {path}[/red]")
+                    else:  # directory
+                        self.console.print(f"[bold]Checking directory: [blue]{path}[/blue]...[/bold]")
+                        self.console.print("[yellow]Note: Downloading directories is not fully implemented yet. You might want to navigate manually.[/yellow]")
+                        # Future enhancement: Implement directory crawling and downloading
+                else:
+                    self.console.print(f"[red]Invalid selection: {idx}[/red]")
+            
+            if downloaded_files:
+                self.console.print(f"\n[green]Successfully downloaded {len(downloaded_files)} files[/green]")
+                download_dir = os.path.dirname(downloaded_files[0]) if downloaded_files else None
+                if download_dir:
+                    self.console.print(f"Files saved in: {download_dir}")
+            else:
+                self.console.print("[yellow]No files were successfully downloaded[/yellow]")
+            
+            return downloaded_files
+                
+        except KeyboardInterrupt:
+            self.console.print("\n[yellow]Download operation cancelled by user[/yellow]")
+            return downloaded_files 
