@@ -1213,8 +1213,107 @@ class Enumeration:
                     web_dirs = web_service.get("directories", [])
                     break
         
+        # If no files or directories were found, perform a quick enumeration to discover files
         if not web_files and not web_dirs:
-            self.console.print("[yellow]No files or directories discovered on this port[/yellow]")
+            self.console.print("[yellow]No files or directories discovered yet. Performing quick enumeration to find files...[/yellow]")
+            
+            # Initialize downloader if not present
+            if not hasattr(self, 'downloader'):
+                from redflow.utils.downloader import FileDownloader
+                self.downloader = FileDownloader(self.config.output_dir, self.logger, self.console)
+            
+            # Create a web_info dictionary to store results
+            web_info = {
+                "port": port_str,
+                "protocol": protocol,
+                "directories": [],
+                "files": [],
+                "tech": [],
+                "vhosts": [],
+                "downloaded_files": []
+            }
+            
+            # Create target URL
+            target_url = f"{protocol}://{target}:{port_str}/"
+            
+            # Try to check for common files
+            common_files = [
+                "robots.txt", "sitemap.xml", ".htaccess", "crossdomain.xml", 
+                "index.html", "index.php", "default.aspx", "favicon.ico",
+                ".git/HEAD", "README.md", "CHANGELOG.md"
+            ]
+            
+            self.console.print(f"[cyan]Checking for common files on {target_url}...[/cyan]")
+            
+            for file in common_files:
+                file_url = f"{target_url}{file}"
+                try:
+                    import requests
+                    from requests.packages.urllib3.exceptions import InsecureRequestWarning
+                    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+                    
+                    resp = requests.get(file_url, verify=False, timeout=5)
+                    if resp.status_code == 200:
+                        file_path = f"/{file}"
+                        if file_path not in web_info["files"]:
+                            self.logger.info(f"Found common file: {file_path}")
+                            self.console.print(f"[green]Found: {file_path}[/green]")
+                            web_info["files"].append(file_path)
+                except Exception as e:
+                    self.logger.debug(f"Error checking {file_url}: {str(e)}")
+            
+            # Check for interesting paths in root directory
+            interesting_paths = [
+                "/backup", "/admin", "/login", "/config", "/dashboard", 
+                "/wp-admin", "/wp-login.php", "/wp-config.php", "/config.php",
+                "/administrator", "/phpmyadmin", "/secret", "/private", "/uploads",
+                "/images", "/img", "/css", "/js", "/scripts", "/assets"
+            ]
+            
+            self.console.print(f"[cyan]Checking for common directories on {target_url}...[/cyan]")
+            
+            for path in interesting_paths:
+                path_url = f"{target_url.rstrip('/')}{path}"
+                try:
+                    resp = requests.get(path_url, verify=False, timeout=5)
+                    if resp.status_code != 404:
+                        if path.endswith("/") or "." not in path:
+                            if path not in web_info["directories"]:
+                                self.logger.info(f"Found interesting directory: {path}")
+                                self.console.print(f"[green]Found directory: {path}[/green]")
+                                web_info["directories"].append(path)
+                        else:
+                            if path not in web_info["files"]:
+                                self.logger.info(f"Found interesting file: {path}")
+                                self.console.print(f"[green]Found file: {path}[/green]")
+                                web_info["files"].append(path)
+                except Exception as e:
+                    self.logger.debug(f"Error checking {path_url}: {str(e)}")
+            
+            # Update web_files and web_dirs with newly discovered items
+            web_files = web_info["files"]
+            web_dirs = web_info["directories"]
+            
+            # Store the results for future use
+            # Make sure we have a list structure for web results
+            if not isinstance(self.results["web"], list):
+                self.results["web"] = []
+            
+            # Check if we have an entry for this port/protocol
+            found = False
+            for i, web_service in enumerate(self.results["web"]):
+                if str(web_service.get("port", "")) == port_str and web_service.get("protocol", "") == protocol:
+                    self.results["web"][i] = web_info
+                    found = True
+                    break
+            
+            if not found:
+                self.results["web"].append(web_info)
+        
+        # If we still have no files or directories, inform the user
+        if not web_files and not web_dirs:
+            self.console.print("[yellow]No files or directories discovered on this port even after enumeration.[/yellow]")
+            self.console.print("[yellow]You may need to run a full scan first with: python redflow.py --target " + target + " --mode full[/yellow]")
             return downloaded_files
         
         # Initialize downloader if not present
