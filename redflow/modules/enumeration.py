@@ -290,7 +290,7 @@ class Enumeration:
         
         for web_service in web_services:
             port = web_service["port"]
-            is_https = web_service["service"].lower() == "https"
+            is_https = web_service["name"].lower() == "https"
             protocol = "https" if is_https else "http"
             
             web_info = {
