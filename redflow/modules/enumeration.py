@@ -1202,6 +1202,18 @@ class Enumeration:
         port_str = str(port)
         downloaded_files = []
         
+        # Initialize downloader first, outside the core logic, to handle dependencies
+        try:
+            if not hasattr(self, 'downloader'):
+                from redflow.utils.downloader import FileDownloader
+                self.downloader = FileDownloader(self.config.output_dir, self.logger, self.console)
+        except ImportError as e:
+            # Handle the case where dependencies are missing
+            missing_package = str(e).split("'")[-2] if "'" in str(e) else str(e)
+            self.console.print(f"[bold red]Missing dependency: {missing_package}[/bold red]")
+            self.console.print(f"[yellow]Please install it with: pip install {missing_package}[/yellow]")
+            return downloaded_files
+        
         # Get the web service results for the specified port
         web_files = []
         web_dirs = []
@@ -1213,14 +1225,61 @@ class Enumeration:
                     web_dirs = web_service.get("directories", [])
                     break
         
+        # Check if we found any files in previous full scan
+        discovered_files_path = os.path.join(self.config.output_dir, "results.json")
+        if (not web_files and not web_dirs) and os.path.exists(discovered_files_path):
+            try:
+                self.console.print("[yellow]Looking for discovered files in previous scan results...[/yellow]")
+                with open(discovered_files_path, 'r') as f:
+                    scan_results = json.load(f)
+                    
+                # Look for web enumeration results
+                if "enumeration" in scan_results and "web" in scan_results["enumeration"]:
+                    web_results = scan_results["enumeration"]["web"]
+                    
+                    # Look for the matching port and protocol
+                    if isinstance(web_results, list):
+                        for web_result in web_results:
+                            if str(web_result.get("port", "")) == port_str and web_result.get("protocol", "") == protocol:
+                                web_files = web_result.get("files", [])
+                                web_dirs = web_result.get("directories", [])
+                                
+                                # Update current results
+                                if web_files or web_dirs:
+                                    self.console.print(f"[green]Found {len(web_files)} files and {len(web_dirs)} directories in previous scan results![/green]")
+                                    
+                                    # Update our current results
+                                    web_info = {
+                                        "port": port_str,
+                                        "protocol": protocol,
+                                        "directories": web_dirs,
+                                        "files": web_files,
+                                        "tech": web_result.get("tech", []),
+                                        "vhosts": web_result.get("vhosts", []),
+                                        "downloaded_files": web_result.get("downloaded_files", [])
+                                    }
+                                    
+                                    # Store in our current results
+                                    if not isinstance(self.results["web"], list):
+                                        self.results["web"] = []
+                                    
+                                    found = False
+                                    for i, service in enumerate(self.results["web"]):
+                                        if str(service.get("port", "")) == port_str and service.get("protocol", "") == protocol:
+                                            self.results["web"][i] = web_info
+                                            found = True
+                                            break
+                                    
+                                    if not found:
+                                        self.results["web"].append(web_info)
+                                    
+                                    break
+        except Exception as e:
+            self.logger.error(f"Error loading discovered files from scan results: {str(e)}")
+        
         # If no files or directories were found, perform a quick enumeration to discover files
         if not web_files and not web_dirs:
             self.console.print("[yellow]No files or directories discovered yet. Performing quick enumeration to find files...[/yellow]")
-            
-            # Initialize downloader if not present
-            if not hasattr(self, 'downloader'):
-                from redflow.utils.downloader import FileDownloader
-                self.downloader = FileDownloader(self.config.output_dir, self.logger, self.console)
             
             # Create a web_info dictionary to store results
             web_info = {
@@ -1240,7 +1299,8 @@ class Enumeration:
             common_files = [
                 "robots.txt", "sitemap.xml", ".htaccess", "crossdomain.xml", 
                 "index.html", "index.php", "default.aspx", "favicon.ico",
-                ".git/HEAD", "README.md", "CHANGELOG.md"
+                ".git/HEAD", "README.md", "CHANGELOG.md", "login.php",
+                "admin.php", "wp-login.php", "config.php", "phpinfo.php"
             ]
             
             self.console.print(f"[cyan]Checking for common files on {target_url}...[/cyan]")
@@ -1275,7 +1335,7 @@ class Enumeration:
             for path in interesting_paths:
                 path_url = f"{target_url.rstrip('/')}{path}"
                 try:
-                    resp = requests.get(path_url, verify=False, timeout=5)
+                    resp = requests.head(path_url, verify=False, timeout=5)
                     if resp.status_code != 404:
                         if path.endswith("/") or "." not in path:
                             if path not in web_info["directories"]:
@@ -1313,15 +1373,10 @@ class Enumeration:
         # If we still have no files or directories, inform the user
         if not web_files and not web_dirs:
             self.console.print("[yellow]No files or directories discovered on this port even after enumeration.[/yellow]")
-            self.console.print("[yellow]You may need to run a full scan first with: python redflow.py --target " + target + " --mode full[/yellow]")
+            self.console.print(f"[yellow]You may need to run a full scan first with: python redflow.py --target {target} --mode full[/yellow]")
             return downloaded_files
         
-        # Initialize downloader if not present
-        if not hasattr(self, 'downloader'):
-            from redflow.utils.downloader import FileDownloader
-            self.downloader = FileDownloader(self.config.output_dir, self.logger, self.console)
-        
-        # Display available files
+        # Display discovered files and directories for selection
         self.console.print(f"\n[bold cyan]Files discovered on {protocol}://{target}:{port_str}[/bold cyan]")
         
         all_paths = []
@@ -1360,6 +1415,13 @@ class Enumeration:
             
             # Download selected files
             base_url = f"{protocol}://{target}:{port_str}"
+            target_dir = os.path.join(self.config.output_dir, "downloads", f"{protocol}_{port_str}")
+            os.makedirs(target_dir, exist_ok=True)
+            
+            self.console.print(f"[cyan]Files will be downloaded to: {target_dir}[/cyan]")
+            
+            total_success = 0
+            total_failed = 0
             
             for idx in indices:
                 if 1 <= idx <= len(all_paths):
@@ -1372,34 +1434,123 @@ class Enumeration:
                     
                     if item_type == "file":
                         self.console.print(f"[bold]Downloading file: [blue]{path}[/blue]...[/bold]")
-                        result = self.downloader.download_http_file(
-                            url=url,
-                            target_dir=None,  # Use default directory
-                            verify=False
-                        )
                         
-                        if result:
-                            downloaded_files.append(result)
-                            self.console.print(f"[green]Downloaded to:[/green] {result}")
-                        else:
-                            self.console.print(f"[red]Failed to download {path}[/red]")
+                        try:
+                            # Directly use requests for download to handle dependency issues
+                            local_filename = os.path.join(target_dir, os.path.basename(path))
+                            
+                            # Ensure we have a filename
+                            if not os.path.basename(path):
+                                local_filename = os.path.join(target_dir, "index.html")
+                            
+                            # Download the file
+                            import requests
+                            response = requests.get(url, verify=False)
+                            if response.status_code == 200:
+                                with open(local_filename, 'wb') as f:
+                                    f.write(response.content)
+                                
+                                downloaded_files.append(local_filename)
+                                self.console.print(f"[green]Downloaded to:[/green] {local_filename}")
+                                total_success += 1
+                                
+                                # Store in results
+                                for web_result in self.results["web"]:
+                                    if str(web_result.get("port", "")) == port_str and web_result.get("protocol", "") == protocol:
+                                        if "downloaded_files" not in web_result:
+                                            web_result["downloaded_files"] = []
+                                        
+                                        web_result["downloaded_files"].append({
+                                            "url": url,
+                                            "local_path": local_filename
+                                        })
+                                        break
+                        except Exception as e:
+                            self.console.print(f"[red]Failed to download {path}: {str(e)}[/red]")
+                            total_failed += 1
                     else:  # directory
                         self.console.print(f"[bold]Checking directory: [blue]{path}[/blue]...[/bold]")
-                        self.console.print("[yellow]Note: Downloading directories is not fully implemented yet. You might want to navigate manually.[/yellow]")
-                        # Future enhancement: Implement directory crawling and downloading
+                        
+                        try:
+                            # Try to download index files from directory
+                            index_files = ["index.html", "index.php", "default.asp", "index.jsp", "default.html"]
+                            dir_success = False
+                            
+                            for index in index_files:
+                                index_url = f"{base_url}{path}/{index}"
+                                self.console.print(f"[cyan]Trying: {index_url}[/cyan]")
+                                
+                                # Check if file exists
+                                response = requests.head(index_url, verify=False, timeout=5)
+                                if response.status_code == 200:
+                                    # Download the file
+                                    dir_path = os.path.join(target_dir, os.path.basename(path.rstrip('/')))
+                                    os.makedirs(dir_path, exist_ok=True)
+                                    
+                                    local_filename = os.path.join(dir_path, index)
+                                    response = requests.get(index_url, verify=False)
+                                    
+                                    with open(local_filename, 'wb') as f:
+                                        f.write(response.content)
+                                    
+                                    downloaded_files.append(local_filename)
+                                    self.console.print(f"[green]Downloaded directory index to:[/green] {local_filename}")
+                                    dir_success = True
+                                    total_success += 1
+                                    
+                                    # Store in results
+                                    for web_result in self.results["web"]:
+                                        if str(web_result.get("port", "")) == port_str and web_result.get("protocol", "") == protocol:
+                                            if "downloaded_files" not in web_result:
+                                                web_result["downloaded_files"] = []
+                                            
+                                            web_result["downloaded_files"].append({
+                                                "url": index_url,
+                                                "local_path": local_filename
+                                            })
+                                            break
+                                            
+                            if not dir_success:
+                                self.console.print("[yellow]No index files found in directory. Try manually browsing to the directory.[/yellow]")
+                                total_failed += 1
+                        except Exception as e:
+                            self.console.print(f"[red]Failed to check directory {path}: {str(e)}[/red]")
+                            total_failed += 1
                 else:
                     self.console.print(f"[red]Invalid selection: {idx}[/red]")
             
+            # Save results
+            try:
+                results_file = os.path.join(self.config.output_dir, "results.json")
+                if os.path.exists(results_file):
+                    with open(results_file, 'r') as f:
+                        all_results = json.load(f)
+                    
+                    # Update the web results
+                    if "enumeration" in all_results:
+                        all_results["enumeration"]["web"] = self.results["web"]
+                    
+                    with open(results_file, 'w') as f:
+                        json.dump(all_results, f, indent=4)
+            except Exception as e:
+                self.logger.error(f"Error saving download results: {str(e)}")
+            
+            # Display summary
             if downloaded_files:
-                self.console.print(f"\n[green]Successfully downloaded {len(downloaded_files)} files[/green]")
-                download_dir = os.path.dirname(downloaded_files[0]) if downloaded_files else None
-                if download_dir:
-                    self.console.print(f"Files saved in: {download_dir}")
+                self.console.print(f"\n[green]Successfully downloaded {total_success} files[/green]")
+                self.console.print(f"[cyan]Files saved in: {target_dir}[/cyan]")
+                
+                # Show command to view files
+                self.console.print("\n[yellow]To view or manage downloaded files:[/yellow]")
+                self.console.print(f"[cyan]cd {target_dir}[/cyan]")
+                self.console.print("[cyan]ls -la[/cyan]")
             else:
                 self.console.print("[yellow]No files were successfully downloaded[/yellow]")
             
+            if total_failed > 0:
+                self.console.print(f"[yellow]Failed to download {total_failed} item(s)[/yellow]")
+            
             return downloaded_files
-                
         except KeyboardInterrupt:
             self.console.print("\n[yellow]Download operation cancelled by user[/yellow]")
             return downloaded_files 

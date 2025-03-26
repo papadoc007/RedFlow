@@ -5,12 +5,18 @@ Module for downloading files from target hosts using various protocols
 import os
 import requests
 import ftplib
-from ftputil import FTPHost
 from urllib.parse import urlparse, unquote
 from requests.exceptions import RequestException
 import logging
 from pathlib import Path
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
+# Try to import FTPHost from ftputil, but provide fallback if not available
+try:
+    from ftputil import FTPHost
+    FTPUTIL_AVAILABLE = True
+except ImportError:
+    FTPUTIL_AVAILABLE = False
 
 class FileDownloader:
     """
@@ -34,6 +40,12 @@ class FileDownloader:
         self.download_dir = os.path.join(output_dir, "downloads")
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
+            
+        # Check if ftputil is available and log warning if not
+        if not FTPUTIL_AVAILABLE and logger:
+            self.logger.warning("ftputil package is not installed. FTP downloads will use basic functionality.")
+            if console:
+                console.print("[yellow]Warning: ftputil package is not installed. Install it with 'pip install ftputil' for better FTP support.[/yellow]")
     
     def download_http_file(self, url, target_dir=None, auth=None, verify=False):
         """
@@ -125,23 +137,36 @@ class FileDownloader:
         try:
             self.logger.info(f"Downloading FTP file {remote_path} from {host} to {local_path}")
             
-            # Connect to FTP server
-            if self.console:
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[blue]Downloading FTP file..."),
-                    BarColumn(),
-                    TaskProgressColumn(),
-                    console=self.console
-                ) as progress:
-                    task = progress.add_task("Downloading", total=1)
-                    
+            # Use different methods based on whether ftputil is available
+            if FTPUTIL_AVAILABLE:
+                # Advanced FTP client with ftputil
+                if self.console:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[blue]Downloading FTP file..."),
+                        BarColumn(),
+                        TaskProgressColumn(),
+                        console=self.console
+                    ) as progress:
+                        task = progress.add_task("Downloading", total=1)
+                        
+                        with FTPHost(host, username, password, port=port) as ftp:
+                            ftp.download(remote_path, local_path)
+                        progress.update(task, completed=1)
+                else:
                     with FTPHost(host, username, password, port=port) as ftp:
                         ftp.download(remote_path, local_path)
-                    progress.update(task, completed=1)
             else:
-                with FTPHost(host, username, password, port=port) as ftp:
-                    ftp.download(remote_path, local_path)
+                # Basic FTP client (fallback)
+                if self.console:
+                    self.console.print("[yellow]Using basic FTP functionality. Install ftputil for better FTP support.[/yellow]")
+                
+                with ftplib.FTP() as ftp:
+                    ftp.connect(host, port)
+                    ftp.login(username, password)
+                    
+                    with open(local_path, 'wb') as f:
+                        ftp.retrbinary(f"RETR {remote_path}", f.write)
                     
             self.logger.info(f"Successfully downloaded {remote_path} from {host} to {local_path}")
             return local_path
