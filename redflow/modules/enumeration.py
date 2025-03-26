@@ -145,57 +145,207 @@ class Enumeration:
         """
         self.logger.info(f"Performing FTP enumeration for {self.target}")
         
-        ftp_results = {
+        # Check if we have FTP services
+        if not ftp_services or len(ftp_services) == 0:
+            self.logger.warning("No FTP services found to enumerate")
+            return
+        
+        # We need to handle each FTP service individually
+        for ftp_service in ftp_services:
+            # Handle both string and dictionary service representations
+            if isinstance(ftp_service, dict):
+                port = ftp_service.get("port", "21")
+                version = ftp_service.get("version", "")
+                
+                # Call the standalone FTP enumeration method
+                ftp_info = self._enumerate_single_ftp(
+                    host=str(self.target),  # Ensure host is a string
+                    port=port,
+                    service_info=ftp_service
+                )
+                
+                # Save results
+                self.results["ftp"] = ftp_info
+            else:
+                self.logger.warning(f"Unexpected FTP service format: {ftp_service}")
+
+    def _enumerate_single_ftp(self, host, port=21, service_info=None):
+        """
+        Enumerate an FTP server
+        
+        Args:
+            host (str): Target host
+            port (int or str): Target port
+            service_info (dict, optional): Service info from Nmap
+            
+        Returns:
+            dict: FTP enumeration results
+        """
+        # Ensure host is a string
+        host = str(host)
+        
+        # Ensure port is a string for logging and an integer for connecting
+        port_str = str(port)
+        try:
+            port_int = int(port)
+        except (ValueError, TypeError):
+            self.logger.error(f"Invalid port number for FTP enumeration: {port}")
+            port_int = 21
+        
+        ftp_info = {
+            "port": port_str,
+            "name": "ftp",
             "anonymous_access": False,
-            "version": "",
             "directories": [],
-            "port": ftp_services[0]["port"] if ftp_services else 21
+            "files": [],
+            "downloaded_files": []
         }
         
-        # Check anonymous access
-        for ftp_service in ftp_services:
-            port = ftp_service["port"]
-            version = ftp_service.get("version", "")
-            ftp_results["version"] = version
-            
-            # Try anonymous login
-            output_file = self.config.get_output_file(f"ftp_anon_{port}", "txt")
-            
-            cmd = ["nmap", "--script", "ftp-anon", "-p", str(port), self.target, "-oN", output_file]
-            
-            result = run_tool(cmd)
-            
-            if result["returncode"] == 0:
-                self.logger.debug(f"Anonymous FTP login check results saved in: {output_file}")
-                
-                # Analyze the results
-                for line in result["stdout"].splitlines():
-                    if "Anonymous FTP login allowed" in line:
-                        ftp_results["anonymous_access"] = True
-                        self.logger.info(f"Anonymous access granted to FTP on port {port}")
-                        break
-            
-            # If anonymous access is granted, try to enumerate directories
-            if ftp_results["anonymous_access"]:
-                dirs_file = self.config.get_output_file(f"ftp_dirs_{port}", "txt")
-                
-                # You can use other tools like wget or curl with FTP requests
-                cmd = ["nmap", "--script", "ftp-ls", "-p", str(port), self.target, "-oN", dirs_file]
-                
-                result = run_tool(cmd)
-                
-                if result["returncode"] == 0:
-                    self.logger.debug(f"Directory enumeration results saved in: {dirs_file}")
-                    
-                    # Analyze the results
-                    for line in result["stdout"].splitlines():
-                        if "|" in line and "ftp-ls" in line:
-                            dir_match = re.search(r"\s+(/\S+)", line)
-                            if dir_match:
-                                ftp_results["directories"].append(dir_match.group(1))
+        # Add service version if available
+        if service_info and "version" in service_info:
+            ftp_info["version"] = service_info["version"]
         
-        self.results["ftp"] = ftp_results
+        try:
+            # Try anonymous login
+            self.logger.info(f"Attempting anonymous FTP login to {host}:{port_str}")
+            ftp = ftplib.FTP()
+            ftp.connect(host, port_int)  # host is guaranteed to be a string
+            ftp.login("anonymous", "anonymous@example.com")
+            
+            # If we got here, anonymous login succeeded
+            ftp_info["anonymous_access"] = True
+            self.logger.warning(f"Anonymous FTP access allowed on {host}:{port_str}")
+            
+            # List root directory
+            self._list_ftp_directory(ftp, "/", ftp_info)
+            
+            # Download interesting files if found and downloader is available
+            if hasattr(self, 'downloader') and self.downloader:
+                self._download_interesting_ftp_files(host, port_str, ftp_info)
+            
+            ftp.quit()
+            
+        except ftplib.all_errors as e:
+            self.logger.info(f"FTP enumeration error for {host}:{port_str}: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error in FTP enumeration for {host}:{port_str}: {str(e)}")
+        
+        return ftp_info
     
+    def _list_ftp_directory(self, ftp, directory, ftp_info, max_depth=2, current_depth=0):
+        """
+        Recursively list FTP directories
+        
+        Args:
+            ftp (ftplib.FTP): FTP connection
+            directory (str): Current directory to list
+            ftp_info (dict): FTP information dictionary to update
+            max_depth (int): Maximum recursion depth
+            current_depth (int): Current recursion depth
+        """
+        if current_depth > max_depth:
+            return
+            
+        try:
+            original_dir = ftp.pwd()
+            
+            # Try to change to directory
+            ftp.cwd(directory)
+            current_dir = ftp.pwd()
+            
+            # Add directory to list if not already there
+            if current_dir not in ftp_info["directories"]:
+                ftp_info["directories"].append(current_dir)
+            
+            # List files and directories
+            file_list = []
+            ftp.retrlines('LIST', file_list.append)
+            
+            for item in file_list:
+                parts = item.split()
+                if len(parts) < 9:
+                    continue
+                    
+                # Check if it's a directory
+                is_dir = parts[0].startswith('d')
+                filename = " ".join(parts[8:])
+                
+                if is_dir and current_depth < max_depth:
+                    # Recursively list subdirectory
+                    new_dir = f"{current_dir}/{filename}" if current_dir != "/" else f"/{filename}"
+                    self._list_ftp_directory(ftp, new_dir, ftp_info, max_depth, current_depth + 1)
+                else:
+                    # It's a file, add to file list
+                    file_path = f"{current_dir}/{filename}" if current_dir != "/" else f"/{filename}"
+                    ftp_info["files"].append(file_path)
+            
+            # Return to original directory
+            ftp.cwd(original_dir)
+            
+        except ftplib.all_errors as e:
+            self.logger.debug(f"Error listing FTP directory {directory}: {str(e)}")
+
+    def _download_interesting_ftp_files(self, host, port, ftp_info):
+        """
+        Download interesting files from FTP server
+        
+        Args:
+            host (str): FTP server host
+            port (int): FTP server port
+            ftp_info (dict): FTP information dictionary to update
+        """
+        # Create a specific directory for FTP downloads
+        target_dir = self.downloader.create_directory_for_downloads("ftp", port)
+        
+        # Define interesting file patterns
+        interesting_extensions = [
+            ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", 
+            ".conf", ".config", ".ini", ".log", ".bak", ".backup",
+            ".sql", ".db", ".php", ".asp", ".aspx", ".jsp", ".cgi"
+        ]
+        
+        interesting_filenames = [
+            "passwd", "password", "credentials", "users", "admin",
+            "config", "settings", "database", "backup", "README"
+        ]
+        
+        # Check each file
+        for file_path in ftp_info["files"]:
+            filename = os.path.basename(file_path)
+            extension = os.path.splitext(filename)[1].lower()
+            
+            # Check if file matches our criteria
+            is_interesting = False
+            
+            if extension in interesting_extensions:
+                is_interesting = True
+                
+            for pattern in interesting_filenames:
+                if pattern.lower() in filename.lower():
+                    is_interesting = True
+                    break
+                    
+            if is_interesting:
+                # Try to download the file
+                try:
+                    self.logger.info(f"Downloading interesting FTP file: {file_path}")
+                    
+                    # Try anonymous login first
+                    result = self.downloader.download_ftp_file(
+                        host=host,
+                        remote_path=file_path,
+                        target_dir=target_dir
+                    )
+                    
+                    if result:
+                        ftp_info["downloaded_files"].append({
+                            "remote_path": file_path,
+                            "local_path": result
+                        })
+                        
+                except Exception as e:
+                    self.logger.error(f"Error downloading FTP file {file_path}: {str(e)}")
+
     def _enumerate_smb(self, smb_services):
         """
         Perform SMB/Windows enumeration
@@ -734,170 +884,6 @@ class Enumeration:
         
         self.console.print("")  # Extra space 
 
-    def _enumerate_ftp(self, host, port=21, service_info=None):
-        """
-        Enumerate an FTP server
-        
-        Args:
-            host (str): Target host
-            port (int): Target port
-            service_info (dict, optional): Service info from Nmap
-            
-        Returns:
-            dict: FTP enumeration results
-        """
-        ftp_info = {
-            "port": port,
-            "name": "ftp",
-            "anonymous_access": False,
-            "directories": [],
-            "files": [],
-            "downloaded_files": []
-        }
-        
-        # Add service version if available
-        if service_info and "version" in service_info:
-            ftp_info["version"] = service_info["version"]
-        
-        try:
-            # Try anonymous login
-            self.logger.info(f"Attempting anonymous FTP login to {host}:{port}")
-            ftp = ftplib.FTP()
-            ftp.connect(host, port)
-            ftp.login("anonymous", "anonymous@example.com")
-            
-            # If we got here, anonymous login succeeded
-            ftp_info["anonymous_access"] = True
-            self.logger.warning(f"Anonymous FTP access allowed on {host}:{port}")
-            
-            # List root directory
-            self._list_ftp_directory(ftp, "/", ftp_info)
-            
-            # Download interesting files if found and downloader is available
-            if hasattr(self, 'downloader') and self.downloader:
-                self._download_interesting_ftp_files(host, port, ftp_info)
-            
-            ftp.quit()
-            
-        except ftplib.all_errors as e:
-            self.logger.info(f"FTP enumeration error for {host}:{port}: {str(e)}")
-        
-        return ftp_info
-    
-    def _list_ftp_directory(self, ftp, directory, ftp_info, max_depth=2, current_depth=0):
-        """
-        Recursively list FTP directories
-        
-        Args:
-            ftp (ftplib.FTP): FTP connection
-            directory (str): Current directory to list
-            ftp_info (dict): FTP information dictionary to update
-            max_depth (int): Maximum recursion depth
-            current_depth (int): Current recursion depth
-        """
-        if current_depth > max_depth:
-            return
-            
-        try:
-            original_dir = ftp.pwd()
-            
-            # Try to change to directory
-            ftp.cwd(directory)
-            current_dir = ftp.pwd()
-            
-            # Add directory to list if not already there
-            if current_dir not in ftp_info["directories"]:
-                ftp_info["directories"].append(current_dir)
-            
-            # List files and directories
-            file_list = []
-            ftp.retrlines('LIST', file_list.append)
-            
-            for item in file_list:
-                parts = item.split()
-                if len(parts) < 9:
-                    continue
-                    
-                # Check if it's a directory
-                is_dir = parts[0].startswith('d')
-                filename = " ".join(parts[8:])
-                
-                if is_dir and current_depth < max_depth:
-                    # Recursively list subdirectory
-                    new_dir = f"{current_dir}/{filename}" if current_dir != "/" else f"/{filename}"
-                    self._list_ftp_directory(ftp, new_dir, ftp_info, max_depth, current_depth + 1)
-                else:
-                    # It's a file, add to file list
-                    file_path = f"{current_dir}/{filename}" if current_dir != "/" else f"/{filename}"
-                    ftp_info["files"].append(file_path)
-            
-            # Return to original directory
-            ftp.cwd(original_dir)
-            
-        except ftplib.all_errors as e:
-            self.logger.debug(f"Error listing FTP directory {directory}: {str(e)}")
-
-    def _download_interesting_ftp_files(self, host, port, ftp_info):
-        """
-        Download interesting files from FTP server
-        
-        Args:
-            host (str): FTP server host
-            port (int): FTP server port
-            ftp_info (dict): FTP information dictionary to update
-        """
-        # Create a specific directory for FTP downloads
-        target_dir = self.downloader.create_directory_for_downloads("ftp", port)
-        
-        # Define interesting file patterns
-        interesting_extensions = [
-            ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", 
-            ".conf", ".config", ".ini", ".log", ".bak", ".backup",
-            ".sql", ".db", ".php", ".asp", ".aspx", ".jsp", ".cgi"
-        ]
-        
-        interesting_filenames = [
-            "passwd", "password", "credentials", "users", "admin",
-            "config", "settings", "database", "backup", "README"
-        ]
-        
-        # Check each file
-        for file_path in ftp_info["files"]:
-            filename = os.path.basename(file_path)
-            extension = os.path.splitext(filename)[1].lower()
-            
-            # Check if file matches our criteria
-            is_interesting = False
-            
-            if extension in interesting_extensions:
-                is_interesting = True
-                
-            for pattern in interesting_filenames:
-                if pattern.lower() in filename.lower():
-                    is_interesting = True
-                    break
-                    
-            if is_interesting:
-                # Try to download the file
-                try:
-                    self.logger.info(f"Downloading interesting FTP file: {file_path}")
-                    
-                    # Try anonymous login first
-                    result = self.downloader.download_ftp_file(
-                        host=host,
-                        remote_path=file_path,
-                        target_dir=target_dir
-                    )
-                    
-                    if result:
-                        ftp_info["downloaded_files"].append({
-                            "remote_path": file_path,
-                            "local_path": result
-                        })
-                        
-                except Exception as e:
-                    self.logger.error(f"Error downloading FTP file {file_path}: {str(e)}")
-
     def enumerate_services(self, target, services, output_dir):
         """
         Enumerate discovered services
@@ -911,6 +897,7 @@ class Enumeration:
             dict: Enumeration results
         """
         self.logger.info(f"Starting service enumeration for {target}")
+        self.target = target  # Ensure target is set
         
         # Initialize downloader if not present
         if not hasattr(self, 'downloader'):
@@ -924,44 +911,275 @@ class Enumeration:
         for service_type, instances in service_types.items():
             self.logger.info(f"Will enumerate {len(instances)} {service_type} service(s)")
         
-        # FTP enumeration
-        if "ftp" in service_types:
-            ftp_task = progress.add_task("[cyan]Performing FTP enumeration...", total=1)
-            self._enumerate_ftp(service_types["ftp"])
-            progress.update(ftp_task, completed=1)
-        
-        # SMB/Windows enumeration
-        if "smb" in service_types or "microsoft-ds" in service_types:
-            smb_task = progress.add_task("[cyan]Performing SMB/Windows enumeration...", total=1)
-            smb_services = service_types.get("smb", []) + service_types.get("microsoft-ds", [])
-            self._enumerate_smb(smb_services)
-            progress.update(smb_task, completed=1)
-        
-        # Web service enumeration
-        if "http" in service_types or "https" in service_types:
-            web_task = progress.add_task("[cyan]Performing Web service enumeration...", total=1)
-            web_services = service_types.get("http", []) + service_types.get("https", [])
-            self._enumerate_web(web_services)
-            progress.update(web_task, completed=1)
-        
-        # SSH enumeration
-        if "ssh" in service_types:
-            ssh_task = progress.add_task("[cyan]Performing SSH enumeration...", total=1)
-            self._enumerate_ssh(service_types["ssh"])
-            progress.update(ssh_task, completed=1)
-        
-        # Database enumeration
-        db_services = []
-        for db_type in ["mysql", "postgresql", "mssql", "oracle"]:
-            if db_type in service_types:
-                db_services.extend(service_types[db_type])
-        
-        if db_services:
-            db_task = progress.add_task("[cyan]Performing database enumeration...", total=1)
-            self._enumerate_databases(db_services)
-            progress.update(db_task, completed=1)
+        # Create progress display
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            console=self.console
+        ) as progress:
+            # FTP enumeration
+            if "ftp" in service_types:
+                ftp_task = progress.add_task("[cyan]Performing FTP enumeration...", total=1)
+                self._enumerate_ftp(service_types["ftp"])
+                progress.update(ftp_task, completed=1)
+            
+            # SMB/Windows enumeration
+            if "smb" in service_types or "microsoft-ds" in service_types:
+                smb_task = progress.add_task("[cyan]Performing SMB/Windows enumeration...", total=1)
+                smb_services = service_types.get("smb", []) + service_types.get("microsoft-ds", [])
+                self._enumerate_smb(smb_services)
+                progress.update(smb_task, completed=1)
+            
+            # Web service enumeration
+            if "http" in service_types or "https" in service_types:
+                web_task = progress.add_task("[cyan]Performing Web service enumeration...", total=1)
+                web_services = service_types.get("http", []) + service_types.get("https", [])
+                self._enumerate_web(web_services)
+                progress.update(web_task, completed=1)
+            
+            # SSH enumeration
+            if "ssh" in service_types:
+                ssh_task = progress.add_task("[cyan]Performing SSH enumeration...", total=1)
+                self._enumerate_ssh(service_types["ssh"])
+                progress.update(ssh_task, completed=1)
+            
+            # Database enumeration
+            db_services = []
+            for db_type in ["mysql", "postgresql", "mssql", "oracle"]:
+                if db_type in service_types:
+                    db_services.extend(service_types[db_type])
+            
+            if db_services:
+                db_task = progress.add_task("[cyan]Performing database enumeration...", total=1)
+                self._enumerate_databases(db_services)
+                progress.update(db_task, completed=1)
         
         # After all enumerations are completed
         self._show_results_summary()
         
         return self.results 
+
+    def list_discovered_files(self, target=None, port=80, protocol="http"):
+        """
+        List all discovered files for a specific web service
+        
+        Args:
+            target (str, optional): Target host (if different from current target)
+            port (int or str): Port of the web service
+            protocol (str): Protocol (http or https)
+            
+        Returns:
+            dict: Dictionary with discovered files information
+        """
+        if target is None:
+            target = self.target
+
+        port_str = str(port)
+        
+        # Find the web service results for the specified port
+        web_files = []
+        web_dirs = []
+        downloaded_files = []
+        
+        if isinstance(self.results["web"], list):
+            for web_service in self.results["web"]:
+                if str(web_service.get("port", "")) == port_str and web_service.get("protocol", "") == protocol:
+                    web_files = web_service.get("files", [])
+                    web_dirs = web_service.get("directories", [])
+                    downloaded_files = web_service.get("downloaded_files", [])
+                    break
+        
+        result = {
+            "target": target,
+            "port": port_str,
+            "protocol": protocol,
+            "url": f"{protocol}://{target}:{port_str}",
+            "files": web_files,
+            "directories": web_dirs,
+            "downloaded_files": downloaded_files
+        }
+        
+        # Display summary to console
+        self.console.print(f"\n[bold cyan]Files discovered on {protocol}://{target}:{port_str}[/bold cyan]")
+        
+        if web_files:
+            self.console.print(f"\n[bold green]Files ({len(web_files)}):[/bold green]")
+            for file in web_files:
+                self.console.print(f"  {file}")
+        else:
+            self.console.print("[yellow]No files discovered[/yellow]")
+            
+        if web_dirs:
+            self.console.print(f"\n[bold green]Directories ({len(web_dirs)}):[/bold green]")
+            for directory in web_dirs:
+                self.console.print(f"  {directory}")
+        else:
+            self.console.print("[yellow]No directories discovered[/yellow]")
+            
+        if downloaded_files:
+            self.console.print(f"\n[bold green]Downloaded Files ({len(downloaded_files)}):[/bold green]")
+            for df in downloaded_files:
+                url = df.get("url", "Unknown URL")
+                path = df.get("local_path", "Unknown path")
+                filename = os.path.basename(path)
+                self.console.print(f"  {filename} - [blue]{url}[/blue] - [yellow]{path}[/yellow]")
+        else:
+            self.console.print("[yellow]No files have been downloaded yet[/yellow]")
+            
+        return result
+        
+    def download_file(self, url, target_dir=None):
+        """
+        Download a specific file from a URL
+        
+        Args:
+            url (str): Full URL to the file
+            target_dir (str, optional): Directory to save the file
+            
+        Returns:
+            str: Path to the downloaded file or None if download failed
+        """
+        if not hasattr(self, 'downloader'):
+            from redflow.utils.downloader import FileDownloader
+            self.downloader = FileDownloader(self.config.output_dir, self.logger, self.console)
+            
+        # Parse URL to determine protocol
+        if url.startswith("http://") or url.startswith("https://"):
+            protocol = "http"
+            url_to_download = url
+            
+            # Extract host and port from URL if needed
+            host = None
+            port = None
+            
+            self.console.print(f"[bold]Downloading file from [blue]{url}[/blue]...[/bold]")
+            
+            result = self.downloader.download_http_file(
+                url=url_to_download,
+                target_dir=target_dir,
+                verify=False
+            )
+            
+            if result:
+                self.console.print(f"[green]File downloaded successfully to:[/green] {result}")
+                return result
+            else:
+                self.console.print("[red]Failed to download file[/red]")
+                return None
+        elif url.startswith("ftp://"):
+            protocol = "ftp"
+            # Handle FTP URLs
+            from urllib.parse import urlparse
+            parsed_url = urlparse(url)
+            host = parsed_url.netloc
+            path = parsed_url.path
+            
+            self.console.print(f"[bold]Downloading file from [blue]{url}[/blue]...[/bold]")
+            
+            result = self.downloader.download_ftp_file(
+                host=host,
+                remote_path=path,
+                target_dir=target_dir
+            )
+            
+            if result:
+                self.console.print(f"[green]File downloaded successfully to:[/green] {result}")
+                return result
+            else:
+                self.console.print("[red]Failed to download file[/red]")
+                return None
+        else:
+            # Assume it's a simple path on an HTTP server
+            protocol = "http"
+            if not url.startswith("/"):
+                url = "/" + url
+                
+            # Try to determine target and port from current results
+            if self.target and "web" in self.results:
+                web_results = self.results["web"]
+                if isinstance(web_results, list) and len(web_results) > 0:
+                    # Default to first web service found
+                    web_service = web_results[0]
+                    target = self.target
+                    port = web_service.get("port", 80)
+                    protocol = web_service.get("protocol", "http")
+                    
+                    full_url = f"{protocol}://{target}:{port}{url}"
+                    
+                    self.console.print(f"[bold]Downloading file from [blue]{full_url}[/blue]...[/bold]")
+                    
+                    result = self.downloader.download_http_file(
+                        url=full_url,
+                        target_dir=target_dir,
+                        verify=False
+                    )
+                    
+                    if result:
+                        self.console.print(f"[green]File downloaded successfully to:[/green] {result}")
+                        return result
+                    else:
+                        self.console.print("[red]Failed to download file[/red]")
+                        return None
+                else:
+                    self.console.print("[red]Cannot determine web server details for download[/red]")
+                    return None
+            else:
+                self.console.print("[red]Cannot determine web server details for download[/red]")
+                return None
+    
+    def view_web_file_content(self, file_path=None, url=None):
+        """
+        View the content of a web file
+        
+        Args:
+            file_path (str, optional): Path to a locally downloaded file
+            url (str, optional): URL to download and view
+            
+        Returns:
+            str: Content of the file or error message
+        """
+        content = None
+        
+        if file_path and os.path.exists(file_path):
+            # Read local file
+            try:
+                with open(file_path, 'r', errors='ignore') as f:
+                    content = f.read()
+                self.console.print(f"[bold]Content of file [blue]{file_path}[/blue]:[/bold]")
+                self.console.print("---" * 20)
+                self.console.print(content)
+                self.console.print("---" * 20)
+                return content
+            except Exception as e:
+                error_msg = f"Error reading file: {str(e)}"
+                self.console.print(f"[red]{error_msg}[/red]")
+                return error_msg
+        elif url:
+            # Download and read the file
+            import tempfile
+            temp_dir = tempfile.mkdtemp()
+            downloaded_file = self.download_file(url, temp_dir)
+            
+            if downloaded_file:
+                try:
+                    with open(downloaded_file, 'r', errors='ignore') as f:
+                        content = f.read()
+                    self.console.print(f"[bold]Content of file [blue]{url}[/blue]:[/bold]")
+                    self.console.print("---" * 20)
+                    self.console.print(content)
+                    self.console.print("---" * 20)
+                    return content
+                except Exception as e:
+                    error_msg = f"Error reading file: {str(e)}"
+                    self.console.print(f"[red]{error_msg}[/red]")
+                    return error_msg
+            else:
+                error_msg = "Failed to download file"
+                self.console.print(f"[red]{error_msg}[/red]")
+                return error_msg
+        else:
+            error_msg = "No file path or URL provided"
+            self.console.print(f"[red]{error_msg}[/red]")
+            return error_msg 

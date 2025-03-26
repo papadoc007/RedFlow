@@ -112,6 +112,9 @@ class FileDownloader:
         Returns:
             str: Path to the downloaded file or None if download failed
         """
+        # Ensure host is a string
+        host = str(host)
+        
         target_dir = target_dir or self.download_dir
         if not os.path.exists(target_dir):
             os.makedirs(target_dir)
@@ -178,6 +181,9 @@ class FileDownloader:
             if not host:
                 self.logger.error("Host is required for FTP downloads")
                 return None
+            
+            # Ensure host is a string
+            host = str(host)
                 
             # Parse username and password from auth
             username = "anonymous"
