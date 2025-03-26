@@ -139,17 +139,19 @@ class ReportGenerator:
             # Open ports
             # פורטים פתוחים
             open_ports = results.get("open_ports", [])
-            f.write("## Open Ports\n\n")
-            if open_ports:
-                f.write("| Port | Service | Version |\n")
-                f.write("|------|--------|------|\n")
-                for port in open_ports:
+            f.write("\n## Open Ports / פורטים פתוחים\n\n")
+            f.write("| Port | Service | Version |\n")
+            f.write("|------|--------|------|\n")
+            for port in open_ports:
+                if isinstance(port, str):
+                    # If port is a string, just display the port number
+                    f.write(f"| {port} | Unknown | Unknown |\n")
+                else:
+                    # If port is a dictionary, extract data as before
                     port_num = port.get("port", "?")
                     service = port.get("service", "לא ידוע")
                     version = port.get("version", "")
                     f.write(f"| {port_num} | {service} | {version} |\n")
-            else:
-                f.write("No open ports found.\n")
             f.write("\n")
             
             # Passive reconnaissance
