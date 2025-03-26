@@ -476,8 +476,10 @@ class RedFlowGUI:
                 config.set_gpt_api_key(self.api_key_entry.get())
                 config.set_custom_prompt(self.prompt_text.get("1.0", tk.END))
             
-            # Create scanner
-            scanner = Scanner(config, logger, None)  # No console in GUI mode
+            # Create scanner with console object
+            from rich.console import Console
+            console = Console(file=open(os.devnull, "w"))  # Redirect to null device
+            scanner = Scanner(config, logger, console)  # Use console object instead of None
             
             # Run scan
             scanner.start()
