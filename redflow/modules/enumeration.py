@@ -1228,6 +1228,7 @@ class Enumeration:
         # Check if we found any files in previous full scan
         discovered_files_path = os.path.join(self.config.output_dir, "results.json")
         if (not web_files and not web_dirs) and os.path.exists(discovered_files_path):
+            # Using a single try-except block for the entire operations
             try:
                 self.console.print("[yellow]Looking for discovered files in previous scan results...[/yellow]")
                 with open(discovered_files_path, 'r') as f:
@@ -1272,10 +1273,9 @@ class Enumeration:
                                     
                                     if not found:
                                         self.results["web"].append(web_info)
-                                    
                                     break
-        except Exception as e:
-            self.logger.error(f"Error loading discovered files from scan results: {str(e)}")
+            except Exception as e:
+                self.logger.error(f"Error loading discovered files from scan results: {str(e)}")
         
         # If no files or directories were found, perform a quick enumeration to discover files
         if not web_files and not web_dirs:
