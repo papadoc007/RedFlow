@@ -68,7 +68,33 @@ EN = {
     "export_json": "Export to JSON",
     "export_html": "Export to HTML",
     "export_pdf": "Export to PDF",
-    "language": "Language"
+    "language": "Language",
+    "tools_frame": "Tool Paths",
+    "gpt_frame": "GPT Settings",
+    "api_key_label": "API Key:",
+    "model_label": "Model:",
+    "custom_prompt_label": "Custom Prompt:",
+    "config_file_frame": "Configuration File",
+    "results_notebook_summary": "Summary",
+    "results_notebook_ports": "Ports and Services",
+    "results_notebook_vulns": "Vulnerabilities",
+    "results_notebook_details": "Full Details",
+    "no_scan_yet": "No scan performed yet.",
+    "summary_target_info": "== Target Information ==",
+    "summary_target_type": "Type: ",
+    "summary_ip_address": "IP Address: ",
+    "summary_hostname": "Hostname: ",
+    "summary_domain": "Domain: ",
+    "summary_open_ports": "== Open Ports ",
+    "summary_port": "Port ",
+    "summary_and_more_ports": "...and ",
+    "summary_more_ports": " more ports",
+    "summary_vulnerabilities": "== Vulnerabilities ",
+    "summary_and_more_vulns": "...and ",
+    "summary_more_vulns": " more vulnerabilities",
+    "no_logs_to_save": "No logs to save",
+    "log_file_not_exist": "Log file does not exist",
+    "scan_started": "Scan started."
 }
 
 HE = {
@@ -118,7 +144,33 @@ HE = {
     "export_json": "ייצוא לקובץ JSON",
     "export_html": "ייצוא לקובץ HTML",
     "export_pdf": "ייצוא לקובץ PDF",
-    "language": "שפה"
+    "language": "שפה",
+    "tools_frame": "נתיבי כלים",
+    "gpt_frame": "הגדרות GPT",
+    "api_key_label": "מפתח API:",
+    "model_label": "מודל:",
+    "custom_prompt_label": "פרומפט מותאם אישית:",
+    "config_file_frame": "קובץ תצורה",
+    "results_notebook_summary": "סיכום",
+    "results_notebook_ports": "פורטים ושירותים",
+    "results_notebook_vulns": "פגיעויות",
+    "results_notebook_details": "פרטים מלאים",
+    "no_scan_yet": "לא בוצעה סריקה עדיין.",
+    "summary_target_info": "== מידע על המטרה ==",
+    "summary_target_type": "סוג: ",
+    "summary_ip_address": "כתובת IP: ",
+    "summary_hostname": "שם מארח: ",
+    "summary_domain": "דומיין: ",
+    "summary_open_ports": "== פורטים פתוחים ",
+    "summary_port": "פורט ",
+    "summary_and_more_ports": "...ועוד ",
+    "summary_more_ports": " פורטים",
+    "summary_vulnerabilities": "== פגיעויות ",
+    "summary_and_more_vulns": "...ועוד ",
+    "summary_more_vulns": " פגיעויות",
+    "no_logs_to_save": "אין לוגים לשמירה",
+    "log_file_not_exist": "קובץ לוג לא קיים",
+    "scan_started": "סריקה התחילה."
 }
 
 class RedFlowGUI:
@@ -240,7 +292,7 @@ class RedFlowGUI:
     def setup_config_tab(self):
         """Set up the configuration tab"""
         # Tools Paths Frame
-        tools_frame = ttk.LabelFrame(self.config_tab, text="נתיבי כלים")
+        tools_frame = ttk.LabelFrame(self.config_tab, text=self.lang["tools_frame"])
         tools_frame.pack(fill=tk.X, padx=10, pady=10)
         
         tools = ["nmap", "enum4linux", "hydra", "gobuster", "whois", "dig", "theHarvester", "sublist3r", "whatweb", "wafw00f"]
@@ -255,24 +307,24 @@ class RedFlowGUI:
             self.tool_entries[tool] = entry
         
         # GPT Settings Frame
-        gpt_frame = ttk.LabelFrame(self.config_tab, text="הגדרות GPT")
+        gpt_frame = ttk.LabelFrame(self.config_tab, text=self.lang["gpt_frame"])
         gpt_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        ttk.Label(gpt_frame, text="מפתח API:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(gpt_frame, text=self.lang["api_key_label"]).grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.api_key_entry = ttk.Entry(gpt_frame, width=40, show="*")
         self.api_key_entry.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
         
-        ttk.Label(gpt_frame, text="מודל:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(gpt_frame, text=self.lang["model_label"]).grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         self.model_combo = ttk.Combobox(gpt_frame, values=["gpt-4", "gpt-3.5-turbo"])
         self.model_combo.current(0)
         self.model_combo.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
         
-        ttk.Label(gpt_frame, text="פרומפט מותאם אישית:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(gpt_frame, text=self.lang["custom_prompt_label"]).grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
         self.prompt_text = tk.Text(gpt_frame, width=40, height=4)
         self.prompt_text.grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
         
         # Config File Frame
-        config_file_frame = ttk.LabelFrame(self.config_tab, text="קובץ תצורה")
+        config_file_frame = ttk.LabelFrame(self.config_tab, text=self.lang["config_file_frame"])
         config_file_frame.pack(fill=tk.X, padx=10, pady=10)
         
         ttk.Button(config_file_frame, text=self.lang["load_config"], command=self.load_config).grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
@@ -294,10 +346,10 @@ class RedFlowGUI:
         self.vulns_tab = ttk.Frame(results_notebook)
         self.details_tab = ttk.Frame(results_notebook)
         
-        results_notebook.add(self.summary_tab, text="סיכום")
-        results_notebook.add(self.ports_tab, text="פורטים ושירותים")
-        results_notebook.add(self.vulns_tab, text="פגיעויות")
-        results_notebook.add(self.details_tab, text="פרטים מלאים")
+        results_notebook.add(self.summary_tab, text=self.lang["results_notebook_summary"])
+        results_notebook.add(self.ports_tab, text=self.lang["results_notebook_ports"])
+        results_notebook.add(self.vulns_tab, text=self.lang["results_notebook_vulns"])
+        results_notebook.add(self.details_tab, text=self.lang["results_notebook_details"])
         
         # Summary Tab
         self.summary_text = tk.Text(self.summary_tab, wrap=tk.WORD)
@@ -305,7 +357,7 @@ class RedFlowGUI:
         summary_scroll = ttk.Scrollbar(self.summary_tab, command=self.summary_text.yview)
         summary_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.summary_text.config(yscrollcommand=summary_scroll.set)
-        self.summary_text.insert(tk.END, "לא בוצעה סריקה עדיין.")
+        self.summary_text.insert(tk.END, self.lang["no_scan_yet"])
         self.summary_text.config(state=tk.DISABLED)
         
         # Export Buttons
@@ -415,7 +467,7 @@ class RedFlowGUI:
             logger = setup_logger(self.current_project_dir, args.verbose)
             
             # Update logs tab
-            self.root.after(100, self.update_logs_tab, "סריקה התחילה.")
+            self.root.after(100, self.update_logs_tab, self.lang["scan_started"])
             
             # Create configuration
             config = Config(args, self.current_project_dir)
@@ -476,45 +528,45 @@ class RedFlowGUI:
             return
         
         # Format summary
-        summary = f"{self.lang['info_title']} סריקה עבור: {results.get('target_info', {}).get('original', 'Unknown')}\n\n"
-        summary += f"{self.lang['info_title']} זמן התחלה: {datetime.fromtimestamp(results.get('start_time', 0)).strftime('%Y-%m-%d %H:%M:%S')}\n"
+        summary = f"{self.lang['info_title']} {self.lang['scan_tab']} for: {results.get('target_info', {}).get('original', 'Unknown')}\n\n"
+        summary += f"{self.lang['info_title']} Start time: {datetime.fromtimestamp(results.get('start_time', 0)).strftime('%Y-%m-%d %H:%M:%S')}\n"
         
         duration = results.get('duration', 0)
         minutes, seconds = divmod(int(duration), 60)
-        summary += f"{self.lang['info_title']} משך זמן: {minutes} דקות ו-{seconds} שניות\n\n"
+        summary += f"{self.lang['info_title']} Duration: {minutes} minutes and {seconds} seconds\n\n"
         
         # Target info
         target_info = results.get('target_info', {})
-        summary += "== מידע על המטרה ==\n"
-        summary += f"{self.lang['info_title']} סוג: {target_info.get('type', 'Unknown')}\n"
+        summary += f"{self.lang['summary_target_info']}\n"
+        summary += f"{self.lang['summary_target_type']} {target_info.get('type', 'Unknown')}\n"
         
         if target_info.get('type') == 'ip':
-            summary += f"{self.lang['info_title']} כתובת IP: {target_info.get('ip', 'Unknown')}\n"
-            summary += f"{self.lang['info_title']} שם מארח: {target_info.get('hostname', 'Unknown')}\n"
+            summary += f"{self.lang['summary_ip_address']} {target_info.get('ip', 'Unknown')}\n"
+            summary += f"{self.lang['summary_hostname']} {target_info.get('hostname', 'Unknown')}\n"
         else:
-            summary += f"{self.lang['info_title']} דומיין: {target_info.get('domain', 'Unknown')}\n"
-            summary += f"{self.lang['info_title']} כתובת IP: {target_info.get('ip', 'Unknown')}\n"
+            summary += f"{self.lang['summary_domain']} {target_info.get('domain', 'Unknown')}\n"
+            summary += f"{self.lang['summary_ip_address']} {target_info.get('ip', 'Unknown')}\n"
         
         # Open ports
         open_ports = results.get('open_ports', [])
-        summary += f"\n== פורטים פתוחים ({len(open_ports)}) ==\n"
+        summary += f"\n{self.lang['summary_open_ports']}({len(open_ports)}) ==\n"
         for port in open_ports[:10]:  # Show only first 10
             if isinstance(port, dict):
-                summary += f"{self.lang['info_title']} פורט {port.get('port', '?')}: {port.get('service', 'Unknown')} {port.get('version', '')}\n"
+                summary += f"{self.lang['summary_port']} {port.get('port', '?')}: {port.get('service', 'Unknown')} {port.get('version', '')}\n"
             else:
-                summary += f"{self.lang['info_title']} פורט {port}\n"
+                summary += f"{self.lang['summary_port']} {port}\n"
         
         if len(open_ports) > 10:
-            summary += f"...ועוד {len(open_ports) - 10} פורטים\n"
+            summary += f"{self.lang['summary_and_more_ports']}{len(open_ports) - 10}{self.lang['summary_more_ports']}\n"
         
         # Vulnerabilities
         vulns = results.get('vulnerabilities', [])
-        summary += f"\n== פגיעויות ({len(vulns)}) ==\n"
+        summary += f"\n{self.lang['summary_vulnerabilities']}({len(vulns)}) ==\n"
         for vuln in vulns[:10]:  # Show only first 10
             summary += f"{vuln.get('name', 'Unknown')} - {vuln.get('severity', 'Unknown')}\n"
         
         if len(vulns) > 10:
-            summary += f"...ועוד {len(vulns) - 10} פגיעויות\n"
+            summary += f"{self.lang['summary_and_more_vulns']}{len(vulns) - 10}{self.lang['summary_more_vulns']}\n"
         
         self.summary_text.insert(tk.END, summary)
         self.summary_text.config(state=tk.DISABLED)
@@ -570,9 +622,9 @@ class RedFlowGUI:
                     self.logs_text.delete(1.0, tk.END)
                     self.logs_text.insert(tk.END, logs)
             except Exception as e:
-                messagebox.showerror(self.lang["error_title"], f"{self.lang['error_title']} קריאת קובץ הלוג נכשלה: {str(e)}")
+                messagebox.showerror(self.lang["error_title"], f"{self.lang['error_title']}: {str(e)}")
         else:
-            messagebox.showinfo(self.lang["info_title"], "קובץ לוג לא קיים")
+            messagebox.showinfo(self.lang["info_title"], self.lang["log_file_not_exist"])
     
     def update_logs_tab(self, message):
         """Append message to logs tab"""
@@ -582,7 +634,7 @@ class RedFlowGUI:
     def save_logs(self):
         """Save logs to file"""
         if not self.logs_text.get(1.0, tk.END).strip():
-            messagebox.showinfo(self.lang["info_title"], "אין לוגים לשמירה")
+            messagebox.showinfo(self.lang["info_title"], self.lang["no_logs_to_save"])
             return
             
         log_file = filedialog.asksaveasfilename(
@@ -597,9 +649,9 @@ class RedFlowGUI:
         try:
             with open(log_file, "w", encoding="utf-8") as f:
                 f.write(self.logs_text.get(1.0, tk.END))
-            messagebox.showinfo(self.lang["info_title"], f"{self.lang['info_title']} הלוגים נשמרו לקובץ {log_file}")
+            messagebox.showinfo(self.lang["info_title"], f"{self.lang['info_title']}: {log_file}")
         except Exception as e:
-            messagebox.showerror(self.lang["error_title"], f"{self.lang['error_title']} שמירת הלוגים נכשלה: {str(e)}")
+            messagebox.showerror(self.lang["error_title"], f"{self.lang['error_title']}: {str(e)}")
     
     def export_results(self, format_type):
         """Export results to specified format"""
