@@ -375,7 +375,7 @@ class ReportGenerator:
             
             # סוף הדוח
             f.write("---\n\n")
-            f.write(f"דוח זה נוצר אוטומטית על ידי RedFlow v{self.config._get_version()}\n")
+            f.write(f"דוח זה נוצר אוטומטית על ידי RedFlow v{self._get_version()}\n")
             f.write(f"תאריך ייצור הדוח: {timestamp}\n")
     
     def _generate_json_report(self, results, json_report_file):
@@ -575,6 +575,7 @@ class ReportGenerator:
         """Returns the tool version
         מחזיר את גרסת הכלי"""
         try:
-            return self.config._get_version()
-        except:
+            from redflow import __version__
+            return __version__
+        except ImportError:
             return "0.1.0" 
