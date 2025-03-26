@@ -108,23 +108,28 @@ class Enumeration:
     
     def _group_services_by_type(self, services):
         """
-        Group services by types
+        Group services by their type
+        // קיבוץ שירותים לפי סוג
         
         Args:
             services: List of identified services
             
         Returns:
-            Dictionary of grouped services
+            Dictionary of service types with lists of services
         """
         service_types = {}
         
         for service in services:
-            service_name = service["service"].lower()
+            service_name = service["name"].lower()
             
             if service_name not in service_types:
                 service_types[service_name] = []
             
             service_types[service_name].append(service)
+        
+        # Log found service types
+        if service_types:
+            self.logger.info(f"Service types identified: {', '.join(service_types.keys())}")
         
         return service_types
     
