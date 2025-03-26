@@ -86,7 +86,7 @@ class ActiveRecon:
         self.logger.info("Starting quick port scan")
         
         # Create output file path
-        quick_scan_output = self.config.get_output_file_path("nmap_quick.xml")
+        quick_scan_output = self.config.get_output_file("nmap_quick", "xml")
         
         # Use Nmap for quick scan
         command = [
@@ -139,7 +139,7 @@ class ActiveRecon:
             return
             
         # Create output file path
-        service_scan_output = self.config.get_output_file_path("nmap_services.xml")
+        service_scan_output = self.config.get_output_file("nmap_services", "xml")
         
         # Join the open ports into a comma-separated string
         port_str = ",".join(self.results["open_ports"])
@@ -214,7 +214,7 @@ class ActiveRecon:
             return
             
         # Create output file path
-        vuln_scan_output = self.config.get_output_file_path("nmap_vulns.xml")
+        vuln_scan_output = self.config.get_output_file("nmap_vulns", "xml")
         
         # Get ports with services
         ports_with_services = [service["port"] for service in self.results["discovered_services"]]
