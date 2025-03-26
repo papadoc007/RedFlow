@@ -1,6 +1,5 @@
 """
 Module for generating reports and result summaries for RedFlow
-מודול לייצור דוחות ותקצירי תוצאות עבור RedFlow
 """
 
 import os
@@ -16,21 +15,16 @@ from redflow.utils.logger import get_module_logger
 
 
 class ReportGenerator:
-    """Class for generating reports and summaries
-    מחלקה לייצור דוחות ותקצירים"""
+    """Class for generating reports and summaries"""
     
     def __init__(self, config, logger, console):
         """
         Initialize the reports module
-        אתחול מודול הדוחות
         
         Args:
             config: Configuration object
-                   אובייקט תצורה
             logger: Logger instance
-                   מופע הלוגר
             console: Console instance
-                    מופע קונסולה
         """
         self.config = config
         self.console = console
@@ -42,20 +36,16 @@ class ReportGenerator:
     def generate(self, results):
         """
         Create a summary report from scan results
-        יצירת דוח מסכם מתוצאות הסריקה
         
         Args:
             results: Scan results from all stages
-                    תוצאות הסריקה מכל השלבים
             
         Returns:
             Path to the summary report
-            נתיב לדוח המסכם
         """
         self.logger.info(f"Generating summary report for {self.target}")
         
         # Create visual progress
-        # יצירת התקדמות ויזואלית
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
@@ -66,23 +56,19 @@ class ReportGenerator:
             generate_task = progress.add_task("[cyan]Generating summary report...", total=4)
             
             # Prepare paths and directories
-            # הכנת נתיבים ותיקיות
             report_file = os.path.join(self.summaries_dir, f"summary_{self.target.replace('.', '_')}.md")
             json_report_file = os.path.join(self.summaries_dir, f"summary_{self.target.replace('.', '_')}.json")
             progress.update(generate_task, advance=1)
             
             # Create detailed report in Markdown
-            # יצירת דוח מפורט ב-Markdown
             self._generate_markdown_report(results, report_file)
             progress.update(generate_task, advance=1)
             
             # Save summary report in JSON
-            # שמירת דוח מסכם ב-JSON
             self._generate_json_report(results, json_report_file)
             progress.update(generate_task, advance=1)
             
             # If required and possible, display the report in the console
-            # אם נדרש וניתן, הצגת הדוח במסוף
             self._display_report_summary(results)
             progress.update(generate_task, advance=1)
         
@@ -93,27 +79,21 @@ class ReportGenerator:
     def _generate_markdown_report(self, results, report_file):
         """
         Create a Markdown report
-        יצירת דוח Markdown
         
         Args:
             results: Scan results
-                    תוצאות הסריקה
             report_file: Path to the report file
-                        נתיב לקובץ הדוח
         """
         self.logger.debug(f"Creating Markdown report at {report_file}")
         
         # Scan time and date details
-        # פרטי זמן ותאריך הסריקה
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         duration = int(results.get("duration", 0))
         minutes, seconds = divmod(duration, 60)
         
         # Start writing the report
-        # תחילת כתיבת הדוח
         with open(report_file, "w", encoding="utf-8") as f:
             # Title and summary
-            # כותרת וסיכום
             f.write(f"# Scan Report - {self.target}\n\n")
             f.write(f"**Scan Date:** {timestamp}\n")
             f.write(f"**Scan Duration:** {minutes} minutes and {seconds} seconds\n")
@@ -121,7 +101,6 @@ class ReportGenerator:
             f.write(f"**Scan Mode:** {self.config.mode}\n\n")
             
             # Target information
-            # מידע על המטרה
             target_info = results.get("target_info", {})
             f.write("## Target Information\n\n")
             if target_info:
@@ -137,9 +116,8 @@ class ReportGenerator:
             f.write("\n")
             
             # Open ports
-            # פורטים פתוחים
             open_ports = results.get("open_ports", [])
-            f.write("\n## Open Ports / פורטים פתוחים\n\n")
+            f.write("\n## Open Ports\n\n")
             f.write("| Port | Service | Version |\n")
             f.write("|------|--------|------|\n")
             for port in open_ports:
@@ -149,13 +127,12 @@ class ReportGenerator:
                 else:
                     # If port is a dictionary, extract data as before
                     port_num = port.get("port", "?")
-                    service = port.get("service", "לא ידוע")
+                    service = port.get("service", "Unknown")
                     version = port.get("version", "")
                     f.write(f"| {port_num} | {service} | {version} |\n")
             f.write("\n")
             
             # Passive reconnaissance
-            # איסוף מידע פסיבי
             passive_recon = results.get("passive_recon", {})
             f.write("## Passive Reconnaissance\n\n")
             if passive_recon:
@@ -216,7 +193,6 @@ class ReportGenerator:
                 f.write("No passive reconnaissance performed or no results found.\n\n")
             
             # Enumeration
-            # תשאול שירותים
             enumeration = results.get("enumeration", {})
             f.write("## Enumeration\n\n")
             if enumeration:
@@ -225,13 +201,12 @@ class ReportGenerator:
                 if ftp_info:
                     f.write("### FTP\n\n")
                     f.write(f"**Port:** {ftp_info.get('port', '21')}\n")
-                    f.write(f"**פורט:** {ftp_info.get('port', '21')}\n")
-                    f.write(f"**גרסה:** {ftp_info.get('version', 'לא ידוע')}\n")
-                    f.write(f"**גישה אנונימית:** {'כן' if ftp_info.get('anonymous_access', False) else 'לא'}\n")
+                    f.write(f"**Version:** {ftp_info.get('version', 'Unknown')}\n")
+                    f.write(f"**Anonymous Access:** {'Yes' if ftp_info.get('anonymous_access', False) else 'No'}\n")
                     
                     directories = ftp_info.get('directories', [])
                     if directories:
-                        f.write("\n**תיקיות שנמצאו:**\n\n")
+                        f.write("\n**Directories Found:**\n\n")
                         for directory in directories:
                             f.write(f"- {directory}\n")
                     f.write("\n")
@@ -240,21 +215,21 @@ class ReportGenerator:
                 smb_info = enumeration.get("smb", {})
                 if smb_info:
                     f.write("### SMB/Windows\n\n")
-                    f.write(f"**פורט:** {smb_info.get('port', '445')}\n")
-                    f.write(f"**גרסה:** {smb_info.get('version', 'לא ידוע')}\n")
-                    f.write(f"**שם מחשב:** {smb_info.get('computer_name', 'לא ידוע')}\n")
-                    f.write(f"**דומיין:** {smb_info.get('domain', 'לא ידוע')}\n")
-                    f.write(f"**מערכת הפעלה:** {smb_info.get('os', 'לא ידוע')}\n")
+                    f.write(f"**Port:** {smb_info.get('port', '445')}\n")
+                    f.write(f"**Version:** {smb_info.get('version', 'Unknown')}\n")
+                    f.write(f"**Computer Name:** {smb_info.get('computer_name', 'Unknown')}\n")
+                    f.write(f"**Domain:** {smb_info.get('domain', 'Unknown')}\n")
+                    f.write(f"**Operating System:** {smb_info.get('os', 'Unknown')}\n")
                     
                     shares = smb_info.get('shares', [])
                     if shares:
-                        f.write("\n**שיתופים שנמצאו:**\n\n")
+                        f.write("\n**Shares Found:**\n\n")
                         for share in shares:
                             f.write(f"- {share}\n")
                     
                     users = smb_info.get('users', [])
                     if users:
-                        f.write("\n**משתמשים שנמצאו:**\n\n")
+                        f.write("\n**Users Found:**\n\n")
                         for user in users:
                             f.write(f"- {user}\n")
                     f.write("\n")
@@ -262,110 +237,110 @@ class ReportGenerator:
                 # Web
                 web_info = enumeration.get("web", [])
                 if web_info:
-                    f.write("### שירותי Web\n\n")
+                    f.write("### Web Services\n\n")
                     if isinstance(web_info, list):
                         for web_service in web_info:
                             protocol = web_service.get('protocol', 'http')
                             port = web_service.get('port', '80')
-                            f.write(f"**שירות {protocol} בפורט {port}:**\n\n")
+                            f.write(f"**{protocol.upper()} Service on port {port}:**\n\n")
                             
                             directories = web_service.get('directories', [])
                             if directories:
-                                f.write("**תיקיות שנמצאו:**\n\n")
-                                for directory in directories[:20]:  # מגביל ל-20 להדגמה
+                                f.write("**Directories Found:**\n\n")
+                                for directory in directories[:20]:  # Limit to 20 for display
                                     f.write(f"- {directory}\n")
                                 if len(directories) > 20:
-                                    f.write(f"- ... ועוד {len(directories)-20} תיקיות\n")
+                                    f.write(f"- ... and {len(directories)-20} more directories\n")
                             
                             files = web_service.get('files', [])
                             if files:
-                                f.write("\n**קבצים שנמצאו:**\n\n")
-                                for file in files[:20]:  # מגביל ל-20 להדגמה
+                                f.write("\n**Files Found:**\n\n")
+                                for file in files[:20]:  # Limit to 20 for display
                                     f.write(f"- {file}\n")
                                 if len(files) > 20:
-                                    f.write(f"- ... ועוד {len(files)-20} קבצים\n")
+                                    f.write(f"- ... and {len(files)-20} more files\n")
                             f.write("\n")
                     else:
-                        f.write("נמצאו שירותי web אך המבנה לא תקין להצגה.\n\n")
+                        f.write("Web services found but structure is not valid for display.\n\n")
                 
                 # SSH
                 ssh_info = enumeration.get("ssh", {})
                 if ssh_info:
                     f.write("### SSH\n\n")
-                    f.write(f"**פורט:** {ssh_info.get('port', '22')}\n")
-                    f.write(f"**גרסה:** {ssh_info.get('version', 'לא ידוע')}\n")
+                    f.write(f"**Port:** {ssh_info.get('port', '22')}\n")
+                    f.write(f"**Version:** {ssh_info.get('version', 'Unknown')}\n")
                     
                     auth_methods = ssh_info.get('auth_methods', [])
                     if auth_methods:
-                        f.write(f"**שיטות אימות:** {', '.join(auth_methods)}\n")
+                        f.write(f"**Authentication Methods:** {', '.join(auth_methods)}\n")
                     
-                    f.write(f"**אלגוריתמים חלשים:** {'כן' if ssh_info.get('weak_algorithms', False) else 'לא'}\n\n")
+                    f.write(f"**Weak Algorithms:** {'Yes' if ssh_info.get('weak_algorithms', False) else 'No'}\n\n")
                 
-                # מסדי נתונים
+                # Databases
                 db_info = enumeration.get("database", {})
                 if db_info:
-                    f.write("### מסדי נתונים\n\n")
+                    f.write("### Databases\n\n")
                     for db_type, instances in db_info.items():
                         for db in instances:
-                            f.write(f"**{db_type} בפורט {db.get('port', 'לא ידוע')}:**\n\n")
-                            f.write(f"**גרסה:** {db.get('version', 'לא ידוע')}\n")
-                            f.write(f"**נגיש:** {'כן' if db.get('accessible', False) else 'לא'}\n")
-                            f.write(f"**אישורים ברירת מחדל:** {'כן' if db.get('default_credentials', False) else 'לא'}\n\n")
+                            f.write(f"**{db_type} on port {db.get('port', 'Unknown')}:**\n\n")
+                            f.write(f"**Version:** {db.get('version', 'Unknown')}\n")
+                            f.write(f"**Accessible:** {'Yes' if db.get('accessible', False) else 'No'}\n")
+                            f.write(f"**Default Credentials:** {'Yes' if db.get('default_credentials', False) else 'No'}\n\n")
             else:
-                f.write("לא בוצע תשאול שירותים או שלא נמצאו תוצאות.\n\n")
+                f.write("No service enumeration performed or no results found.\n\n")
             
-            # פגיעויות וניצול
+            # Vulnerabilities and Exploitation
             exploitation = results.get("exploitation", {})
-            f.write("## פגיעויות וניצול\n\n")
+            f.write("## Vulnerabilities and Exploitation\n\n")
             if exploitation:
-                # פגיעויות
+                # Vulnerabilities
                 vulnerabilities = exploitation.get("vulnerabilities", [])
                 if vulnerabilities:
-                    f.write("### פגיעויות שזוהו\n\n")
-                    f.write("| שירות | פורט | פגיעות | חומרה | תיאור |\n")
+                    f.write("### Identified Vulnerabilities\n\n")
+                    f.write("| Service | Port | Vulnerability | Severity | Description |\n")
                     f.write("|--------|------|---------|-------|--------|\n")
                     for vuln in vulnerabilities:
-                        service = vuln.get("service", "לא ידוע")
+                        service = vuln.get("service", "Unknown")
                         port = vuln.get("port", "?")
-                        name = vuln.get("name", "לא ידוע")
-                        severity = vuln.get("severity", "לא ידוע")
+                        name = vuln.get("name", "Unknown")
+                        severity = vuln.get("severity", "Unknown")
                         description = vuln.get("description", "").replace("\n", " ")
                         f.write(f"| {service} | {port} | {name} | {severity} | {description} |\n")
                     f.write("\n")
                 
-                # אישורים
+                # Credentials
                 credentials = exploitation.get("credentials", [])
                 if credentials:
-                    f.write("### אישורים שנחשפו\n\n")
-                    f.write("| שירות | פורט | שם משתמש | סיסמה |\n")
+                    f.write("### Exposed Credentials\n\n")
+                    f.write("| Service | Port | Username | Password |\n")
                     f.write("|--------|------|------------|--------|\n")
                     for cred in credentials:
-                        service = cred.get("service", "לא ידוע")
+                        service = cred.get("service", "Unknown")
                         port = cred.get("port", "?")
-                        username = cred.get("username", "לא ידוע")
-                        password = cred.get("password", "לא ידוע")
+                        username = cred.get("username", "Unknown")
+                        password = cred.get("password", "Unknown")
                         f.write(f"| {service} | {port} | {username} | {password} |\n")
                     f.write("\n")
                 
                 # Exploits
                 exploits = exploitation.get("exploits", [])
                 if exploits:
-                    f.write("### Exploit-ים פוטנציאליים\n\n")
-                    f.write("| פגיעות | שם | מיקום |\n")
+                    f.write("### Potential Exploits\n\n")
+                    f.write("| Vulnerability | Name | Path |\n")
                     f.write("|---------|------|--------|\n")
                     for exploit in exploits:
-                        vulnerability = exploit.get("vulnerability", "לא ידוע")
-                        name = exploit.get("name", "לא ידוע")
-                        path = exploit.get("path", "לא ידוע")
+                        vulnerability = exploit.get("vulnerability", "Unknown")
+                        name = exploit.get("name", "Unknown")
+                        path = exploit.get("path", "Unknown")
                         f.write(f"| {vulnerability} | {name} | {path} |\n")
                     f.write("\n")
             else:
-                f.write("לא בוצע ניתוח פגיעויות או שלא נמצאו תוצאות.\n\n")
+                f.write("No vulnerability analysis performed or no results found.\n\n")
             
-            # מסקנות והמלצות
-            f.write("## מסקנות והמלצות\n\n")
+            # Conclusions and Recommendations
+            f.write("## Conclusions and Recommendations\n\n")
             
-            # נייצר המלצות בסיסיות על סמך הממצאים
+            # Generate recommendations based on scan results
             recommendations = self._generate_recommendations(results)
             for category, rec_list in recommendations.items():
                 f.write(f"### {category}\n\n")
@@ -373,26 +348,22 @@ class ReportGenerator:
                     f.write(f"- {rec}\n")
                 f.write("\n")
             
-            # סוף הדוח
+            # End of report
             f.write("---\n\n")
-            f.write(f"דוח זה נוצר אוטומטית על ידי RedFlow v{self._get_version()}\n")
-            f.write(f"תאריך ייצור הדוח: {timestamp}\n")
+            f.write(f"This report was automatically generated by RedFlow v{self._get_version()}\n")
+            f.write(f"Report Generation Date: {timestamp}\n")
     
     def _generate_json_report(self, results, json_report_file):
         """
         Create a JSON report
-        יצירת דוח JSON
         
         Args:
             results: Scan results
-                    תוצאות הסריקה
             json_report_file: Path to the report file
-                             נתיב לקובץ הדוח
         """
         self.logger.debug(f"Creating JSON report at {json_report_file}")
         
         # Save all results in an organized JSON structure
-        # שמירת כל התוצאות במבנה JSON מאורגן
         summary = {
             "timestamp": datetime.now().isoformat(),
             "target": self.target,
@@ -409,45 +380,37 @@ class ReportGenerator:
         }
         
         # Add recommendations
-        # הוספת המלצות
         summary["recommendations"] = self._generate_recommendations(results)
         
         # Save to JSON file
-        # שמירה לקובץ JSON
         with open(json_report_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=4, ensure_ascii=False)
     
     def _display_report_summary(self, results):
         """
         Display a brief summary of the report in the console
-        הצגת תקציר קצר של הדוח במסוף
         
         Args:
             results: Scan results
-                    תוצאות הסריקה
         """
         self.logger.debug("Displaying report summary in console")
         
         self.console.print("\n[bold green]== Findings Summary ==[/bold green]")
         
         # Number of open ports
-        # מספר פורטים פתוחים
         open_ports_count = len(results.get("open_ports", []))
         self.console.print(f"[cyan]Open Ports:[/cyan] {open_ports_count}")
         
         # Number of services
-        # מספר שירותים
         services_count = len(results.get("discovered_services", []))
         self.console.print(f"[cyan]Identified Services:[/cyan] {services_count}")
         
         # Number of vulnerabilities
-        # מספר פגיעויות
         if "exploitation" in results:
             vuln_count = len(results["exploitation"].get("vulnerabilities", []))
             self.console.print(f"[cyan]Identified Vulnerabilities:[/cyan] {vuln_count}")
             
             # Vulnerabilities by severity
-            # פגיעויות לפי חומרה
             if vuln_count > 0:
                 severity_count = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0}
                 for vuln in results["exploitation"].get("vulnerabilities", []):
@@ -461,13 +424,11 @@ class ReportGenerator:
                 self.console.print(f"  [green]Low:[/green] {severity_count['LOW']}")
             
             # Exposed credentials
-            # אישורים שנחשפו
             cred_count = len(results["exploitation"].get("credentials", []))
             if cred_count > 0:
                 self.console.print(f"[cyan]Exposed Credentials:[/cyan] {cred_count}")
             
             # Potential exploits
-            # Exploits פוטנציאליים
             exploit_count = len(results["exploitation"].get("exploits", []))
             if exploit_count > 0:
                 self.console.print(f"[cyan]Potential Exploits:[/cyan] {exploit_count}")
@@ -476,104 +437,135 @@ class ReportGenerator:
     
     def _generate_recommendations(self, results):
         """
-        Generate basic recommendations based on findings
-        יצירת המלצות בסיסיות על סמך הממצאים
+        Generate recommendations based on scan results.
         
         Args:
-            results: Scan results
-                    תוצאות הסריקה
+            results (dict): The complete scan results
             
         Returns:
-            Dictionary of recommendations divided into categories
-            מילון המלצות מחולק לקטגוריות
+            dict: Categorized recommendations
         """
         recommendations = {
-            "General Recommendations": [],
-            "Network Security Recommendations": [],
-            "Service Security Recommendations": [],
-            "Urgent Recommendations": []
+            "General Security Recommendations": [],
+            "Service-Specific Recommendations": [],
+            "Vulnerability Mitigation": []
         }
         
-        # General recommendations always appear
-        # המלצות כלליות תמיד יופיעו
-        recommendations["General Recommendations"].append("It is recommended to regularly follow security updates for all exposed services.")
-        recommendations["General Recommendations"].append("Ensure that all services with external access are necessary for business operations.")
+        # Add general recommendations
+        recommendations["General Security Recommendations"] = [
+            "Regularly update and patch all software and services",
+            "Implement a robust firewall to restrict access to necessary services only",
+            "Enable proper logging and monitoring for all critical services",
+            "Configure strong password policies and implement multi-factor authentication where possible"
+        ]
         
-        # Network security recommendations
-        # המלצות אבטחת רשת
-        open_ports = results.get("open_ports", [])
-        if open_ports:
-            if len(open_ports) > 10:
-                recommendations["Network Security Recommendations"].append(f"Found {len(open_ports)} open ports. It is recommended to close unnecessary ports.")
-            
-            # Check sensitive ports
-            # בדיקת פורטים רגישים
-            sensitive_ports = [21, 22, 23, 3389, 5900]
-            exposed_sensitive = []
-            for port in open_ports:
-                if isinstance(port, str):
-                    # If port is a string, try to convert it to integer
-                    try:
-                        port_num = int(port)
-                        if port_num in sensitive_ports:
-                            exposed_sensitive.append(port_num)
-                    except ValueError:
-                        # Skip if port string can't be converted to integer
-                        pass
-                else:
-                    # If port is a dictionary, extract the port number
-                    port_num = port.get("port")
-                    if port_num in sensitive_ports:
-                        exposed_sensitive.append(port_num)
-            
-            if exposed_sensitive:
-                port_str = ", ".join([str(p) for p in exposed_sensitive])
-                recommendations["Network Security Recommendations"].append(f"Sensitive ports exposed: {port_str}. It is recommended to restrict access using a firewall.")
+        # Get service and enumeration data
+        services = results.get("services", {}).get("open_ports", [])
+        enumeration = results.get("enumeration", {})
+        exploitation = results.get("exploitation", {})
         
-        # Service security recommendations
-        # המלצות אבטחת שירותים
-        if "enumeration" in results:
-            enumeration = results["enumeration"]
-            
-            # FTP
-            if "ftp" in enumeration and enumeration["ftp"].get("anonymous_access", False):
-                recommendations["Service Security Recommendations"].append("Anonymous access to FTP is enabled. It is recommended to disable anonymous access if not necessary.")
-            
-            # SMB
-            if "smb" in enumeration and enumeration["smb"].get("shares"):
-                recommendations["Service Security Recommendations"].append("SMB file shares are exposed. Ensure they are properly protected with appropriate access permissions.")
-            
-            # SSH
-            if "ssh" in enumeration and enumeration["ssh"].get("weak_algorithms", False):
-                recommendations["Service Security Recommendations"].append("SSH server uses weak algorithms. It is recommended to update the SSH configuration to support only strong algorithms.")
-            
-            # Web
-            if "web" in enumeration:
-                recommendations["Service Security Recommendations"].append("Web services are exposed. Ensure they are updated and properly configured.")
+        # Service-specific recommendations
+        if services:
+            for port_info in services:
+                if isinstance(port_info, dict):
+                    port = port_info.get("port", "")
+                    service_name = port_info.get("name", "Unknown").lower()
+                    
+                    # Web server recommendations
+                    if service_name in ["http", "https"]:
+                        recommendations["Service-Specific Recommendations"].append(
+                            f"Consider restricting access to the web server on port {port} if not publicly required"
+                        )
+                        recommendations["Service-Specific Recommendations"].append(
+                            f"Implement HTTPS with strong cipher suites for the web service on port {port}"
+                        )
+                        
+                        # Web directories found
+                        web_services = enumeration.get("web", [])
+                        for web_service in web_services:
+                            if isinstance(web_service, dict) and str(web_service.get("port", "")) == str(port):
+                                directories = web_service.get("directories", [])
+                                if directories:
+                                    recommendations["Service-Specific Recommendations"].append(
+                                        f"Review and secure sensitive directories found on the web server (port {port})"
+                                    )
+                    
+                    # FTP recommendations
+                    if service_name == "ftp":
+                        recommendations["Service-Specific Recommendations"].append(
+                            f"Consider replacing FTP on port {port} with SFTP or other encrypted file transfer protocol"
+                        )
+                        
+                        ftp_info = enumeration.get("ftp", {})
+                        if ftp_info and ftp_info.get("anonymous_access", False):
+                            recommendations["Service-Specific Recommendations"].append(
+                                "Disable anonymous FTP access immediately as it poses a significant security risk"
+                            )
+                    
+                    # SSH recommendations
+                    if service_name == "ssh":
+                        recommendations["Service-Specific Recommendations"].append(
+                            f"Configure SSH on port {port} to use only strong ciphers and key exchange algorithms"
+                        )
+                        recommendations["Service-Specific Recommendations"].append(
+                            "Implement key-based authentication for SSH and disable password authentication if possible"
+                        )
+                        
+                        ssh_info = enumeration.get("ssh", {})
+                        if ssh_info and ssh_info.get("weak_algorithms", False):
+                            recommendations["Service-Specific Recommendations"].append(
+                                "Disable weak cryptographic algorithms in the SSH server configuration"
+                            )
+                    
+                    # SMB recommendations
+                    if service_name in ["smb", "microsoft-ds"]:
+                        recommendations["Service-Specific Recommendations"].append(
+                            f"Consider restricting SMB access on port {port} to trusted networks only"
+                        )
+                        recommendations["Service-Specific Recommendations"].append(
+                            "Disable SMBv1 protocol as it has known security vulnerabilities"
+                        )
+                        
+                        smb_info = enumeration.get("smb", {})
+                        if smb_info and smb_info.get("shares", []):
+                            recommendations["Service-Specific Recommendations"].append(
+                                "Review SMB share permissions to ensure principle of least privilege is followed"
+                            )
+                
+                elif isinstance(port_info, str):
+                    # If port_info is a string, we don't have detailed service info
+                    recommendations["Service-Specific Recommendations"].append(
+                        f"Review the necessity of the service running on port {port_info}"
+                    )
         
-        # Urgent recommendations based on severe vulnerabilities
-        # המלצות דחופות על סמך פגיעויות חמורות
-        if "exploitation" in results:
-            exploitation = results["exploitation"]
-            vulnerabilities = exploitation.get("vulnerabilities", [])
-            
-            high_severity_vulns = [v for v in vulnerabilities if v.get("severity") in ["HIGH", "CRITICAL"]]
-            if high_severity_vulns:
-                for vuln in high_severity_vulns:
-                    service = vuln.get("service", "Unknown")
-                    port = vuln.get("port", "Unknown")
+        # Vulnerability-specific recommendations
+        vulnerabilities = exploitation.get("vulnerabilities", [])
+        if vulnerabilities:
+            for vuln in vulnerabilities:
+                if isinstance(vuln, dict):
                     name = vuln.get("name", "Unknown")
-                    recommendations["Urgent Recommendations"].append(f"Urgently address vulnerability {name} in service {service} (port {port}).")
-            
-            creds = exploitation.get("credentials", [])
-            if creds:
-                recommendations["Urgent Recommendations"].append("Weak credentials found. Change passwords immediately and enforce a strong password policy.")
+                    severity = vuln.get("severity", "Unknown")
+                    
+                    if severity.lower() in ["high", "critical"]:
+                        recommendations["Vulnerability Mitigation"].append(
+                            f"Prioritize patching the {name} vulnerability as it is rated {severity}"
+                        )
+                    else:
+                        recommendations["Vulnerability Mitigation"].append(
+                            f"Address the {name} vulnerability according to your security policy"
+                        )
+        
+        # Credentials found
+        credentials = exploitation.get("credentials", [])
+        if credentials:
+            recommendations["Vulnerability Mitigation"].append(
+                "Change all exposed credentials immediately and implement a more secure password policy"
+            )
         
         return recommendations
     
     def _get_version(self):
-        """Returns the tool version
-        מחזיר את גרסת הכלי"""
+        """Returns the tool version"""
         try:
             from redflow import __version__
             return __version__
