@@ -81,8 +81,8 @@ class ActiveRecon:
                 self._perform_service_scan()
                 progress.update(service_scan_task, completed=1)
                 
-                # Only perform vulnerability scan if explicitly requested
-                if self.config.scan_vulns:
+                # Only perform vulnerability scan if explicitly requested and not in quick mode
+                if self.config.scan_vulns and self.config.mode != "quick":
                     vuln_scan_task = progress.add_task(f"[cyan]Checking vulnerabilities on port {specific_port}...", total=1)
                     self._perform_vuln_scan()
                     progress.update(vuln_scan_task, completed=1)
@@ -102,10 +102,11 @@ class ActiveRecon:
                 self._perform_service_scan()
                 progress.update(service_scan_task, completed=1)
                 
-                # Run NSE Scripts
-                vuln_scan_task = progress.add_task("[cyan]Performing vulnerability scan...", total=1)
-                self._perform_vuln_scan()
-                progress.update(vuln_scan_task, completed=1)
+                # Run NSE Scripts only if not in quick mode
+                if self.config.mode != "quick":
+                    vuln_scan_task = progress.add_task("[cyan]Performing vulnerability scan...", total=1)
+                    self._perform_vuln_scan()
+                    progress.update(vuln_scan_task, completed=1)
         
         # After all scans are completed
         self._show_results_summary()

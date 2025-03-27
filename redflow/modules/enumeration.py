@@ -432,264 +432,81 @@ class Enumeration:
         
         self.results["smb"] = smb_results
     
-    def _enumerate_web(self, web_services):
+    def _enumerate_web(self, web_services, quick_mode=False):
         """
-        Perform Web service enumeration
-        // ביצוע תשאול שירותי Web
+        Perform web service enumeration
+        // ביצוע תשאול שירותי web
         
         Args:
-            web_services: List of Web services
+            web_services: List of web services
+            quick_mode: If True, only perform directory enumeration without vulnerability scanning
         """
         self.logger.info(f"Performing Web enumeration for {self.target}")
         
-        web_results = []
-        
-        for web_service in web_services:
-            port = web_service["port"]
-            is_https = web_service["name"].lower() == "https"
+        for service in web_services:
+            port = service.get("port", 80)
+            is_https = service.get("name", "").lower() == "https"
             protocol = "https" if is_https else "http"
+            base_url = f"{protocol}://{self.target}:{port}"
             
-            web_info = {
-                "port": port,
-                "protocol": protocol,
-                "directories": [],
-                "files": [],
-                "tech": [],
-                "vhosts": [],
-                "downloaded_files": []  # Track downloaded files
-            }
-            
-            # Run gobuster to discover hidden directories and pages
-            output_file = self.config.get_output_file(f"gobuster_{port}", "txt")
-            
-            # Create URL
-            target_url = f"{protocol}://{self.target}:{port}/"
-            
-            # Select wordlist
-            wordlist = self.config.wordlist_paths.get("dirb_common")
-            if not os.path.exists(wordlist):
-                # If wordlist not found, try to find another one
-                for key, wl_path in self.config.wordlist_paths.items():
-                    if os.path.exists(wl_path) and "dir" in key:
-                        wordlist = wl_path
-                        break
-            
-            if not wordlist or not os.path.exists(wordlist):
-                self.logger.warning("No suitable wordlist found for gobuster, skipping")
+            # Only run directory enumeration if port is 80 or 443 in quick mode
+            if quick_mode and port not in [80, 443]:
+                self.logger.info(f"Skipping non-standard web port {port} in quick mode")
                 continue
             
-            # Run gobuster
-            self.logger.info(f"Running gobuster against {target_url}")
-            cmd = [
-                "gobuster", "dir",
-                "-u", target_url,
-                "-w", wordlist,
-                "-o", output_file,
-                "-t", str(self.config.tool_settings["gobuster"]["threads"])
-            ]
-            
-            # If HTTPS, add parameter to skip SSL verification
-            if is_https:
-                cmd.extend(["-k"])
-            
-            result = run_tool(cmd, timeout=600)  # Longer runtime
-            
-            if result["returncode"] == 0:
-                self.logger.debug(f"Gobuster results saved in: {output_file}")
+            try:
+                # Run gobuster for directory enumeration
+                self.logger.info(f"Running gobuster against {base_url}/")
+                gobuster_cmd = [
+                    "gobuster", "dir",
+                    "-u", base_url,
+                    "-w", "/usr/share/wordlists/dirb/common.txt",
+                    "-t", "50",
+                    "-q"
+                ]
                 
-                # Parse results
-                if os.path.exists(output_file):
-                    with open(output_file, "r", encoding="utf-8") as f:
-                        lines = f.readlines()
-                        
-                        for line in lines:
-                            if line.startswith("/"):
-                                path = line.split()[0].strip()
-                                if path.endswith("/"):
-                                    web_info["directories"].append(path)
-                                else:
-                                    web_info["files"].append(path)
-                                    
-                    self.logger.info(f"Found {len(web_info['directories'])} directories and {len(web_info['files'])} files")
-            
-            # Run nikto for vulnerability scanning
-            nikto_output = self.config.get_output_file(f"nikto_{port}", "txt")
-            
-            self.logger.info(f"Running nikto vulnerability scan against {target_url}")
-            cmd = ["nikto", "-h", target_url, "-o", nikto_output]
-            
-            # If HTTPS, add parameter to skip SSL verification
-            if is_https:
-                cmd.extend(["-ssl"])
-            
-            result = run_tool(cmd, timeout=600)
-            
-            if result["returncode"] == 0:
-                self.logger.debug(f"Nikto results saved in: {nikto_output}")
-                # Parse nikto results to find additional files or vulnerabilities
-                if os.path.exists(nikto_output):
-                    with open(nikto_output, "r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()
-                        for line in lines:
-                            # Extract file paths from nikto output
-                            if "OSVDB" in line and ":" in line:
-                                parts = line.split(":", 2)
-                                if len(parts) > 2:
-                                    message = parts[2].strip()
-                                    # Extract paths found
-                                    path_match = re.search(r'/([\w\-\.\/]+)', message)
-                                    if path_match and path_match.group(0) not in web_info["files"]:
-                                        web_info["files"].append(path_match.group(0))
-            
-            # Try to check for robots.txt and sitemap.xml
-            common_files = ["robots.txt", "sitemap.xml", ".htaccess", "crossdomain.xml"]
-            for file in common_files:
-                file_url = f"{target_url}{file}"
-                try:
-                    resp = requests.get(file_url, verify=False, timeout=5)
-                    if resp.status_code == 200:
-                        file_path = f"/{file}"
-                        if file_path not in web_info["files"]:
-                            self.logger.info(f"Found common file: {file_path}")
-                            web_info["files"].append(file_path)
-                            
-                            # Parse robots.txt for additional paths
-                            if file == "robots.txt":
-                                for line in resp.text.splitlines():
-                                    if "Disallow:" in line:
-                                        path = line.split("Disallow:", 1)[1].strip()
-                                        if path and path not in web_info["files"] and path not in web_info["directories"]:
-                                            if path.endswith("/"):
-                                                web_info["directories"].append(path)
-                                            else:
-                                                web_info["files"].append(path)
-                except:
-                    pass
+                if is_https:
+                    gobuster_cmd.extend(["-k"])
                 
-            # Check for interesting files in root directory
-            interesting_paths = [
-                "/backup", "/admin", "/login", "/config", "/dashboard", 
-                "/wp-admin", "/wp-login.php", "/wp-config.php", "/config.php",
-                "/administrator", "/phpmyadmin", "/secret"
-            ]
-            
-            for path in interesting_paths:
-                path_url = f"{target_url.rstrip('/')}{path}"
-                try:
-                    resp = requests.get(path_url, verify=False, timeout=5)
-                    if resp.status_code != 404:
-                        if path.endswith("/") or "." not in path:
-                            if path not in web_info["directories"]:
-                                self.logger.info(f"Found interesting directory: {path}")
-                                web_info["directories"].append(path)
-                        else:
-                            if path not in web_info["files"]:
-                                self.logger.info(f"Found interesting file: {path}")
-                                web_info["files"].append(path)
-                except:
-                    pass
-            
-            # Initialize downloader and download interesting files if available
-            if hasattr(self, 'downloader') and self.downloader:
-                # Download interesting files found
-                self._download_interesting_web_files(self.target, port, web_info)
+                result = run_tool(gobuster_cmd)
                 
-            # Add this result to the list of web results
-            web_results.append(web_info)
-        
-        self.results["web"] = web_results
-        
-        # Display information about downloaded files
-        for web_result in web_results:
-            downloaded = web_result.get("downloaded_files", [])
-            if downloaded:
-                port = web_result.get("port")
-                protocol = web_result.get("protocol")
-                self.logger.info(f"Downloaded {len(downloaded)} files from {protocol}://{self.target}:{port}")
-                for dl_file in downloaded:
-                    url = dl_file.get("url", "unknown")
-                    local_path = dl_file.get("local_path", "unknown")
-                    self.logger.info(f"  - {os.path.basename(local_path)} from {url}")
+                if result["returncode"] == 0:
+                    # Parse gobuster output
+                    directories = []
+                    files = []
                     
-                self.console.print(f"[green]Downloaded {len(downloaded)} files from {protocol}://{self.target}:{port}[/green]")
-                self.console.print(f"Files saved in: {os.path.dirname(downloaded[0]['local_path'])}")
-    
-    def _download_interesting_web_files(self, host, port, web_info):
-        """
-        Download interesting files found during web enumeration
-        
-        Args:
-            host (str): Web server host
-            port (int): Web server port
-            web_info (dict): Web information dictionary to update
-        """
-        # Create a specific directory for web downloads
-        target_dir = self.downloader.create_directory_for_downloads(web_info["protocol"], port)
-        
-        # Define interesting file extensions to download
-        interesting_extensions = [
-            ".txt", ".pdf", ".doc", ".docx", ".xls", ".xlsx", 
-            ".conf", ".config", ".ini", ".log", ".bak", ".backup",
-            ".sql", ".db", ".xml", ".json", ".php", ".asp", ".jsp",
-            ".zip", ".tar", ".gz", ".rar"
-        ]
-        
-        protocol = web_info["protocol"]
-        base_url = f"{protocol}://{host}:{port}"
-        
-        # Check each file
-        for file_path in web_info["files"]:
-            # Ensure path starts with /
-            if not file_path.startswith("/"):
-                file_path = "/" + file_path
+                    for line in result["stdout"].splitlines():
+                        if line.strip():
+                            path = line.split()[0]
+                            if path.endswith("/"):
+                                directories.append(path)
+                            else:
+                                files.append(path)
+                    
+                    self.results["web"][f"{protocol}_{port}"] = {
+                        "directories": directories,
+                        "files": files
+                    }
+                    
+                    self.logger.info(f"Found {len(directories)} directories and {len(files)} files")
                 
-            file_url = f"{base_url}{file_path}"
-            filename = os.path.basename(file_path)
-            extension = os.path.splitext(filename)[1].lower()
+                # Skip vulnerability scanning in quick mode
+                if not quick_mode:
+                    # Run nikto vulnerability scan
+                    self.logger.info(f"Running nikto vulnerability scan against {base_url}/")
+                    nikto_cmd = ["nikto", "-h", base_url, "-nointeractive"]
+                    
+                    if is_https:
+                        nikto_cmd.extend(["-ssl"])
+                    
+                    result = run_tool(nikto_cmd)
+                    
+                    if result["returncode"] == 0:
+                        self.results["web"][f"{protocol}_{port}"]["nikto"] = result["stdout"]
             
-            # Only download files with interesting extensions or interesting names
-            interesting_keywords = ["password", "admin", "user", "config", "backup", "secret", "key", "db"]
-            
-            if extension in interesting_extensions or any(keyword in filename.lower() for keyword in interesting_keywords):
-                try:
-                    self.logger.info(f"Downloading interesting web file: {file_url}")
-                    
-                    # Download the file
-                    result = self.downloader.download_http_file(
-                        url=file_url,
-                        target_dir=target_dir,
-                        verify=False
-                    )
-                    
-                    if result:
-                        web_info["downloaded_files"].append({
-                            "url": file_url,
-                            "local_path": result
-                        })
-                        
-                except Exception as e:
-                    self.logger.error(f"Error downloading web file {file_url}: {str(e)}")
-                    
-        # If we have found directories, also try to find index files inside them
-        for dir_path in web_info["directories"]:
-            # Ensure path starts with / and ends with /
-            if not dir_path.startswith("/"):
-                dir_path = "/" + dir_path
-            if not dir_path.endswith("/"):
-                dir_path = dir_path + "/"
-                
-            # Try common index files
-            index_files = ["index.html", "index.php", "default.asp", "index.jsp", "default.html"]
-            for index_file in index_files:
-                file_url = f"{base_url}{dir_path}{index_file}"
-                try:
-                    resp = requests.head(file_url, verify=False, timeout=5)
-                    if resp.status_code == 200:
-                        self.logger.info(f"Found index file: {dir_path}{index_file}")
-                        # Don't need to download index files specifically
-                        break
-                except:
-                    pass
+            except Exception as e:
+                self.logger.error(f"Error during web enumeration: {str(e)}")
+                continue
     
     def _enumerate_ssh(self, ssh_services):
         """
@@ -865,13 +682,13 @@ class Enumeration:
         
         # Web summary
         if self.results["web"]:
-            for web_info in self.results["web"]:
+            for web_info in self.results["web"].values():
                 protocol = web_info.get("protocol", "http")
                 port = web_info.get("port")
                 dirs_count = len(web_info.get("directories", []))
                 files_count = len(web_info.get("files", []))
                 
-                self.console.print(f"[cyan]Web ({protocol} on port {port}):[/cyan]")
+                self.console.print(f"[cyan]{protocol} ({port}):[/cyan]")
                 self.console.print(f"  Directories found: {dirs_count}")
                 self.console.print(f"  Files found: {files_count}")
         
@@ -1766,6 +1583,7 @@ class Enumeration:
     def scan_directory_recursively(self, target, port, protocol, directory_path):
         """
         Perform recursive directory scan on a web server
+        // ביצוע סריקת תיקיות רקורסיבית בשרת web
         
         Args:
             target (str): Target host
@@ -1781,136 +1599,179 @@ class Enumeration:
             "files": []
         }
         
-        self.console.print(f"[bold cyan]Performing deep scan of directory: {directory_path}[/bold cyan]")
+        # Keep track of directories already scanned to avoid infinite loops
+        scanned_dirs = set()
         
-        # Create target URL
-        base_url = f"{protocol}://{target}:{port}"
-        target_url = f"{base_url}{directory_path}"
-        if not target_url.endswith('/'):
-            target_url += '/'
+        # Maximum recursion depth
+        max_depth = 5
         
-        # Try to run a quick gobuster scan on the directory
-        try:
-            # Display available wordlists and let user choose
-            wordlists = {
-                "common": "/usr/share/wordlists/dirb/common.txt",
-                "small": "/usr/share/wordlists/dirb/small.txt",
-                "medium": "/usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt",
-                "big": "/usr/share/dirbuster/wordlists/directory-list-2.3-big.txt",
-                "raft-small": "/usr/share/seclists/Discovery/Web-Content/raft-small-words.txt",
-                "raft-medium": "/usr/share/seclists/Discovery/Web-Content/raft-medium-words.txt"
-            }
+        def scan_dir(current_dir, depth=0):
+            """Inner function to scan directories recursively"""
+            nonlocal result, scanned_dirs
             
-            self.console.print("\n[bold cyan]Available wordlists for scanning:[/bold cyan]")
-            for i, (name, path) in enumerate(wordlists.items(), 1):
-                # Check if wordlist exists
-                if os.path.exists(path):
-                    self.console.print(f"[green]{i}.[/green] {name} - {path}")
-                else:
-                    self.console.print(f"[red]{i}.[/red] {name} - {path} [red](not found)[/red]")
+            if current_dir in scanned_dirs:
+                self.logger.info(f"Directory {current_dir} already scanned, skipping")
+                return
             
-            self.console.print(f"[cyan]Select a wordlist (1-{len(wordlists)}) or press Enter for default:[/cyan]")
-            choice = input("> ").strip()
+            # Add to scanned set
+            scanned_dirs.add(current_dir)
             
-            # Default to common wordlist
-            if not choice or not choice.isdigit() or int(choice) < 1 or int(choice) > len(wordlists):
-                wordlist = list(wordlists.values())[0]
-                wordlist_name = list(wordlists.keys())[0]
-            else:
-                wordlist = list(wordlists.values())[int(choice) - 1]
-                wordlist_name = list(wordlists.keys())[int(choice) - 1]
+            # Check recursion depth
+            if depth >= max_depth:
+                self.logger.info(f"Maximum recursion depth reached for {current_dir}")
+                return
+            
+            self.console.print(f"[bold cyan]Scanning directory: {current_dir} (Depth: {depth+1}/{max_depth})[/bold cyan]")
+            
+            # Create target URL
+            base_url = f"{protocol}://{target}:{port}"
+            target_url = f"{base_url}{current_dir}"
+            if not target_url.endswith('/'):
+                target_url += '/'
+            
+            # Try to run a quick gobuster scan on the directory
+            try:
+                # Choose wordlist
+                wordlists = {
+                    "common": "/usr/share/wordlists/dirb/common.txt",
+                    "small": "/usr/share/wordlists/dirb/small.txt",
+                    "medium": "/usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt"
+                }
                 
-            # Allow custom wordlist path input if selected wordlist doesn't exist
-            if not os.path.exists(wordlist):
-                self.console.print("[yellow]Selected wordlist not found. Enter a custom wordlist path:[/yellow]")
-                custom_path = input("> ").strip()
-                if custom_path and os.path.exists(custom_path):
-                    wordlist = custom_path
-                    wordlist_name = os.path.basename(custom_path)
+                # Use smaller wordlists for deeper directories to improve performance
+                if depth == 0:
+                    wordlist = wordlists.get("medium", "/usr/share/wordlists/dirb/common.txt")
+                    wordlist_name = "medium"
+                elif depth == 1:
+                    wordlist = wordlists.get("common", "/usr/share/wordlists/dirb/common.txt")
+                    wordlist_name = "common"
                 else:
-                    self.console.print("[yellow]No suitable wordlist found for directory scanning[/yellow]")
-                    
-                    # Try the default from the config
-                    wordlist = self.config.wordlist_paths.get("dirb_common")
-                    if not os.path.exists(wordlist):
-                        # If wordlist not found, try to find another one
-                        for key, wl_path in self.config.wordlist_paths.items():
-                            if os.path.exists(wl_path) and "dir" in key:
-                                wordlist = wl_path
-                                break
-            
-            if not wordlist or not os.path.exists(wordlist):
-                self.console.print("[red]No suitable wordlist found for directory scanning[/red]")
-                return result
-            
-            self.console.print(f"[cyan]Running gobuster scan on directory {target_url} with {os.path.basename(wordlist)}...[/cyan]")
-            
-            # Ask for extensions to scan
-            self.console.print("[cyan]Enter file extensions to look for (comma separated, e.g., php,txt,html) or press Enter for none:[/cyan]")
-            extensions = input("> ").strip()
-            
-            # Create temporary output file
-            output_file = os.path.join(self.config.output_dir, f"gobuster_recursive_{port}_{directory_path.replace('/', '_')}.txt")
-            
-            # Build gobuster command
-            cmd = [
-                "gobuster", "dir",
-                "-u", target_url,
-                "-w", wordlist,
-                "-o", output_file,
-                "-t", str(self.config.tool_settings["gobuster"]["threads"])
-            ]
-            
-            # Add extensions if specified
-            if extensions:
-                cmd.extend(["-x", extensions])
-            
-            # Add HTTPS parameter if needed
-            if protocol == "https":
-                cmd.extend(["-k"])
-            
-            # Run gobuster
-            import subprocess
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
-            )
-            
-            self.console.print("[cyan]Scanning in progress, please wait...[/cyan]")
-            stdout, stderr = process.communicate(timeout=180)  # Limit to 3 minutes
-            
-            # Parse results
-            if os.path.exists(output_file):
-                with open(output_file, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    
-                    for line in lines:
-                        if line.startswith("/") or "(Status:" in line:
-                            parts = line.split("(Status:")
-                            if len(parts) > 1:
-                                path = parts[0].strip()
-                                status = parts[1].split(")")[0].strip()
-                                
-                                # Add only items with status codes 2xx or 3xx
-                                if status.startswith("2") or status.startswith("3"):
-                                    full_path = directory_path
-                                    if not full_path.endswith('/'):
-                                        full_path += '/'
-                                    if path.startswith('/'):
-                                        path = path[1:]
-                                    full_path += path
+                    wordlist = wordlists.get("small", "/usr/share/wordlists/dirb/small.txt")
+                    wordlist_name = "small"
+                
+                # Allow custom wordlist path input if selected wordlist doesn't exist
+                if not os.path.exists(wordlist):
+                    if depth == 0:  # Only ask once on the initial scan
+                        self.console.print("\n[bold cyan]Available wordlists for scanning:[/bold cyan]")
+                        for i, (name, path) in enumerate(wordlists.items(), 1):
+                            # Check if wordlist exists
+                            if os.path.exists(path):
+                                self.console.print(f"[green]{i}.[/green] {name} - {path}")
+                            else:
+                                self.console.print(f"[red]{i}.[/red] {name} - {path} [red](not found)[/red]")
+                        
+                        self.console.print(f"[cyan]Select a wordlist (1-{len(wordlists)}) or press Enter for default:[/cyan]")
+                        choice = input("> ").strip()
+                        
+                        # Default to common wordlist
+                        if not choice or not choice.isdigit() or int(choice) < 1 or int(choice) > len(wordlists):
+                            wordlist = "/usr/share/wordlists/dirb/common.txt"
+                            wordlist_name = "common"
+                        else:
+                            wordlist = list(wordlists.values())[int(choice) - 1]
+                            wordlist_name = list(wordlists.keys())[int(choice) - 1]
+                        
+                        # Allow custom wordlist path input if selected wordlist doesn't exist
+                        if not os.path.exists(wordlist):
+                            self.console.print("[yellow]Selected wordlist not found. Enter a custom wordlist path:[/yellow]")
+                            custom_path = input("> ").strip()
+                            if custom_path and os.path.exists(custom_path):
+                                wordlist = custom_path
+                                wordlist_name = os.path.basename(custom_path)
+                    else:
+                        # In recursive scans, just default to common wordlist
+                        wordlist = "/usr/share/wordlists/dirb/common.txt"
+                        wordlist_name = "common"
+                
+                # Ask for extensions to scan (only once on first scan)
+                extensions = "php,html,txt,asp,aspx,jsp,cgi"
+                if depth == 0:
+                    self.console.print(f"[cyan]Using default extensions to look for: {extensions}[/cyan]")
+                    self.console.print("[cyan]Enter different file extensions or press Enter to keep default:[/cyan]")
+                    user_extensions = input("> ").strip()
+                    if user_extensions:
+                        extensions = user_extensions
+                
+                # Create temporary output file
+                sanitized_dir = current_dir.replace('/', '_').replace('\\', '_')
+                output_file = os.path.join(self.config.output_dir, f"gobuster_recursive_{port}_{sanitized_dir}_{depth}.txt")
+                
+                # Build gobuster command
+                cmd = [
+                    "gobuster", "dir",
+                    "-u", target_url,
+                    "-w", wordlist,
+                    "-o", output_file,
+                    "-t", "50"  # Increased threads for faster scanning
+                ]
+                
+                # Add extensions if specified
+                if extensions:
+                    cmd.extend(["-x", extensions])
+                
+                # Add HTTPS parameter if needed
+                if protocol == "https":
+                    cmd.extend(["-k"])
+                
+                # Run gobuster
+                self.logger.info(f"Running gobuster with command: {' '.join(cmd)}")
+                self.console.print(f"[cyan]Scanning {target_url} with wordlist {os.path.basename(wordlist)}...[/cyan]")
+                
+                import subprocess
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+                
+                # Set a timeout scaling with depth (longer for first level, shorter for deeper levels)
+                timeout = 300 if depth == 0 else (180 if depth == 1 else 120)
+                stdout, stderr = process.communicate(timeout=timeout)
+                
+                # Parse results
+                found_dirs = []
+                if os.path.exists(output_file):
+                    with open(output_file, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                        
+                        for line in lines:
+                            if line.startswith("/") or "(Status:" in line:
+                                parts = line.split("(Status:")
+                                if len(parts) > 1:
+                                    path = parts[0].strip()
+                                    status = parts[1].split(")")[0].strip()
                                     
-                                    if path.endswith("/"):
-                                        result["directories"].append(full_path)
-                                    else:
-                                        result["files"].append(full_path)
-                
-                self.console.print(f"[green]Found {len(result['directories'])} directories and {len(result['files'])} files in directory {directory_path}[/green]")
-        except Exception as e:
-            self.console.print(f"[red]Error scanning directory {directory_path}: {str(e)}[/red]")
+                                    # Add only items with status codes 2xx or 3xx
+                                    if status.startswith("2") or status.startswith("3"):
+                                        full_path = current_dir
+                                        if not full_path.endswith('/'):
+                                            full_path += '/'
+                                        if path.startswith('/'):
+                                            path = path[1:]
+                                        full_path += path
+                                        
+                                        if path.endswith("/"):
+                                            result["directories"].append(full_path)
+                                            found_dirs.append(full_path)
+                                        else:
+                                            result["files"].append(full_path)
+                    
+                    self.console.print(f"[green]Found {len(found_dirs)} directories and {len(result['files']) - len(result.get('files', []))} files in {current_dir}[/green]")
+                    
+                    # Recursively scan discovered directories
+                    for dir_path in found_dirs:
+                        scan_dir(dir_path, depth + 1)
+                    
+            except subprocess.TimeoutExpired:
+                self.console.print(f"[yellow]Scan of {current_dir} timed out, continuing with partial results[/yellow]")
+            except Exception as e:
+                self.console.print(f"[red]Error scanning directory {current_dir}: {str(e)}[/red]")
         
+        # Start recursive scan from the initial directory
+        scan_dir(directory_path)
+        
+        self.console.print(f"[bold green]Completed recursive scan. Found {len(result['directories'])} directories and {len(result['files'])} files in total[/bold green]")
         return result
 
     def find_vulnerabilities_with_searchsploit(self, service_name, version=None):
@@ -2266,114 +2127,44 @@ class Enumeration:
                     # Check if the exploit needs to be modified
                     self.console.print("[cyan]Checking if the exploit needs to be modified...[/cyan]")
                     
-                    # Special handling for vsftpd 2.3.4 exploit
-                    is_vsftpd = "vsftpd" in local_path.lower() and "2.3.4" in local_path
-                    use_interactive = is_vsftpd
+                    # Try to run the exploit twice if first attempt fails
+                    success = False
+                    for attempt in range(2):
+                        if attempt > 0:
+                            self.console.print("\n[yellow]ניסיון שני להרצת ההולשה...[/yellow]")
+                            time.sleep(2)  # Wait 2 seconds before retry
+                            
+                        try:
+                            # Run the exploit
+                            process = subprocess.run(["python", local_path, target], capture_output=True, text=True)
+                            
+                            # Check if there were any errors
+                            if process.stderr:
+                                self.console.print("\n[red]Errors:[/red]")
+                                self.console.print(process.stderr)
+                            
+                            # Check if there was any output
+                            if process.stdout:
+                                self.console.print(process.stdout)
+                            
+                            # Check if the process was successful
+                            if process.returncode == 0:
+                                success = True
+                                break
+                            elif "Connection refused" in process.stderr:
+                                self.console.print("[yellow]החיבור נדחה. מנסה שוב...[/yellow]")
+                                continue
+                            else:
+                                self.console.print(f"[red]ההולשה נכשלה עם קוד שגיאה {process.returncode}[/red]")
+                                
+                        except Exception as e:
+                            self.console.print(f"[red]שגיאה בהרצת ההולשה: {str(e)}[/red]")
+                            if attempt == 0:  # Only show retry message on first attempt
+                                self.console.print("[yellow]מנסה שוב...[/yellow]")
                     
-                    try:
-                        # Run the exploit with appropriate method
-                        if use_interactive:
-                            # For vsftpd, use interactive mode to allow command passing
-                            cmd = ["python", local_path, target]
-                            self.console.print(f"[cyan]Running: {' '.join(cmd)}[/cyan]")
-                            
-                            # Start the process and enable interaction
-                            process = subprocess.Popen(
-                                cmd,
-                                stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                bufsize=1,
-                                universal_newlines=True
-                            )
-                            
-                            # Create a real-time two-way interaction for the exploit
-                            import threading
-                            import sys
-                            import time
-                            
-                            # Thread to capture and display output
-                            def capture_output():
-                                while True:
-                                    line = process.stdout.readline()
-                                    if not line and process.poll() is not None:
-                                        break
-                                    if line:
-                                        sys.stdout.write(line)
-                                
-                                # Check for errors after the process ends
-                                stderr = process.stderr.read()
-                                if stderr and "Connection refused" in stderr:
-                                    self.console.print("\n[red]Connection refused. The exploit might need another attempt.[/red]")
-                                elif stderr:
-                                    self.console.print(f"\n[red]Errors:\n{stderr}[/red]")
-                            
-                            # Start output thread
-                            output_thread = threading.Thread(target=capture_output)
-                            output_thread.daemon = True
-                            output_thread.start()
-                            
-                            # For vsftpd, try multiple times if not successful
-                            if is_vsftpd:
-                                # Give it time to connect
-                                time.sleep(2)
-                                
-                                # Try an initial command
-                                self.console.print("[yellow]Testing if shell is working with 'ls' command...[/yellow]")
-                                if process.poll() is None:  # Check if process is still running
-                                    process.stdin.write("ls\n")
-                                    process.stdin.flush()
-                                    time.sleep(1)
-                                
-                                # Wait for user input until they exit
-                                while True:
-                                    if process.poll() is not None:  # Process has ended
-                                        break
-                                    
-                                    try:
-                                        user_cmd = input()
-                                        if user_cmd.lower() in ['exit', 'quit']:
-                                            process.terminate()
-                                            break
-                                        process.stdin.write(f"{user_cmd}\n")
-                                        process.stdin.flush()
-                                    except (EOFError, KeyboardInterrupt):
-                                        process.terminate()
-                                        break
-                            
-                            # Wait for process to complete or user to interrupt
-                            try:
-                                process.wait()
-                            except KeyboardInterrupt:
-                                process.terminate()
-                                self.console.print("\n[yellow]Exploit terminated by user[/yellow]")
-                        else:
-                            # Regular non-interactive exploit
-                            result = subprocess.run(["python", local_path, target], capture_output=True, text=True)
-                            
-                            # Display the output
-                            if result.stdout:
-                                self.console.print("\n[bold]Exploit output:[/bold]")
-                                self.console.print(result.stdout)
-                            
-                            if result.stderr:
-                                self.console.print("\n[bold red]Errors:[/bold red]")
-                                self.console.print(result.stderr)
-                                
-                            # For vsftpd 2.3.4 specific case - it often requires a second connection attempt
-                            if "vsftpd 2.3.4" in local_path and "Connection refused" in result.stderr:
-                                self.console.print("[yellow]The vsftpd backdoor sometimes requires multiple attempts.[/yellow]")
-                                self.console.print("[yellow]Would you like to try running it again? (y/n)[/yellow]")
-                                retry = input("> ").strip().lower()
-                                if retry in ["y", "yes", ""]:
-                                    self.console.print(f"[cyan]Retrying: python {local_path} {target}[/cyan]")
-                                    subprocess.run(["python", local_path, target])
-                                    
-                    except Exception as e:
-                        self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
-                        self.console.print(f"[yellow]You can try running it manually with: python {local_path} {target}[/yellow]")
-                
+                    if not success:
+                        self.console.print("[red]ההולשה נכשלה בשני הניסיונות[/red]")
+                    
             # C exploit
             elif local_path.endswith(".c"):
                 self.console.print("\n[bold green]This is a C exploit that needs to be compiled. Here's how to use it:[/bold green]")
@@ -2555,6 +2346,7 @@ class Enumeration:
     def run_msfconsole(self, target_ip=None):
         """
         Run msfconsole with a target IP
+        // הפעלת msfconsole עם כתובת IP של המטרה
 
         Args:
             target_ip (str, optional): Target IP address. If not provided, will prompt for one.
@@ -2638,22 +2430,67 @@ class Enumeration:
             self.console.print(f"[bold cyan]Running msfconsole with module {module} targeting {target_ip}[/bold cyan]")
             self.console.print(f"Command: {' '.join(msfconsole_cmd)}")
             
+            # Try to run the exploit twice if it fails the first time
             try:
-                # Run msfconsole with a longer timeout since exploits might take time
-                result = run_tool(msfconsole_cmd, timeout=600)
+                # First attempt
+                self.console.print("[cyan]First attempt: Running exploit...[/cyan]")
+                result = run_tool(msfconsole_cmd, timeout=300)  # Reduced timeout for first attempt
                 
                 if result["stdout"]:
                     self.console.print(result["stdout"])
                 if result["stderr"]:
                     self.console.print(f"[red]{result['stderr']}[/red]")
                 
-                # Check for common success indicators
+                # Check for success indicators
                 if "Meterpreter session" in result["stdout"] or "Command shell session" in result["stdout"]:
-                    self.console.print("[green]Session established successfully![/green]")
-                elif result["returncode"] != 0:
-                    self.console.print(f"[red]Command exited with status {result['returncode']}[/red]")
+                    self.console.print("[green]First attempt: Session established successfully![/green]")
+                else:
+                    # Second attempt if the first one didn't establish a session
+                    self.console.print("[yellow]First attempt may not have succeeded. Trying a second time...[/yellow]")
+                    
+                    # Add a slight delay between attempts
+                    import time
+                    time.sleep(3)
+                    
+                    # Second attempt with longer timeout
+                    self.console.print("[cyan]Second attempt: Running exploit...[/cyan]")
+                    result = run_tool(msfconsole_cmd, timeout=600)  # Longer timeout for second attempt
+                    
+                    if result["stdout"]:
+                        self.console.print(result["stdout"])
+                    if result["stderr"]:
+                        self.console.print(f"[red]{result['stderr']}[/red]")
+                    
+                    # Check for success indicators again
+                    if "Meterpreter session" in result["stdout"] or "Command shell session" in result["stdout"]:
+                        self.console.print("[green]Second attempt: Session established successfully![/green]")
+                    elif result["returncode"] != 0:
+                        self.console.print(f"[red]Command exited with status {result['returncode']}[/red]")
+                        
+                        # Offer to open a manual msfconsole session
+                        self.console.print("[yellow]Would you like to open msfconsole manually to try again? (y/n)[/yellow]")
+                        manual_response = input("> ").strip().lower()
+                        
+                        if manual_response in ["y", "yes", ""]:
+                            # Just open msfconsole without any specific module
+                            try:
+                                self.console.print(f"[cyan]Starting plain msfconsole. Use the following commands when it opens:[/cyan]")
+                                self.console.print(f"[green]use {module}[/green]")
+                                self.console.print(f"[green]set RHOSTS {target_ip}[/green]")
+                                for opt in options:
+                                    self.console.print(f"[green]{opt}[/green]")
+                                self.console.print(f"[green]run[/green]")
+                                
+                                # Run msfconsole in a subprocess
+                                subprocess.run(["msfconsole"])
+                            except Exception as e:
+                                self.console.print(f"[red]Error running msfconsole: {str(e)}[/red]")
             except Exception as e:
                 self.console.print(f"[red]Error running msfconsole: {str(e)}[/red]")
+                
+                # Fallback to showing the command
+                self.console.print("[yellow]Command failed. Try running msfconsole manually:[/yellow]")
+                self.console.print("msfconsole")
         
         else:
             # Just open msfconsole without any specific module

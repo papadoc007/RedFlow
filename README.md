@@ -451,3 +451,19 @@ We welcome contributions to the project! Please follow these steps:
 ## License / רישיון
 
 MIT 
+
+## Recent Updates / עדכונים אחרונים
+
+In the latest release, the following improvements have been made / בגרסה האחרונה בוצעו השיפורים הבאים:
+
+1. **Fixed exploit execution issues** - Exploits are now attempted twice automatically if they fail the first time
+   / **תוקנו בעיות בהרצת אקספלויטים** - אקספלויטים כעת מנסים לרוץ פעמיים אוטומטית אם נכשלים בפעם הראשונה
+
+2. **Improved recursive directory scanning** - The recursive directory scanner now uses optimized scanning depths and improved performance
+   / **שיפור בסריקת תיקיות רקורסיבית** - הסורק הרקורסיבי כעת משתמש בעומקי סריקה מותאמים וביצועים משופרים
+
+3. **Enhanced Metasploit integration** - Better feedback and retry mechanisms for Metasploit exploits
+   / **שיפור אינטגרציה עם Metasploit** - משוב טוב יותר ומנגנוני ניסיון נוסף למודולים של Metasploit
+
+4. **Improved GUI results display** - Results are now displayed with better formatting and color-coding in the GUI
+   / **שיפור תצוגת תוצאות בממשק הגרפי** - התוצאות כעת מוצגות עם עיצוב טוב יותר וקידוד צבעים בממשק הגרפי 

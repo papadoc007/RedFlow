@@ -541,59 +541,118 @@ class RedFlowGUI:
             messagebox.showinfo(self.lang["info_title"], self.lang["no_scan_active"])
     
     def update_results(self, results):
-        """Update results tabs with scan results"""
-        # Clear previous results
-        self.summary_text.config(state=tk.NORMAL)
-        self.summary_text.delete(1.0, tk.END)
+        """
+        Update the results tab with scan results
+        // עדכון לשונית התוצאות עם תוצאות הסריקה
+        
+        Args:
+            results: Scan results to display
+        """
+        self.logger.info("Updating GUI with scan results")
         
         if not results:
-            self.summary_text.insert(tk.END, self.lang["no_results"])
-            self.summary_text.config(state=tk.DISABLED)
+            self.console.print("[red]No results to display[/red]")
             return
         
-        # Format summary
-        summary = f"{self.lang['info_title']} {self.lang['scan_tab']} for: {results.get('target_info', {}).get('original', 'Unknown')}\n\n"
-        summary += f"{self.lang['info_title']} Start time: {datetime.fromtimestamp(results.get('start_time', 0)).strftime('%Y-%m-%d %H:%M:%S')}\n"
+        # Clear existing results
+        for widget in self.results_frame.winfo_children():
+            widget.destroy()
         
-        duration = results.get('duration', 0)
-        minutes, seconds = divmod(int(duration), 60)
-        summary += f"{self.lang['info_title']} Duration: {minutes} minutes and {seconds} seconds\n\n"
+        # Create a notebook for results tabs
+        results_notebook = ttk.Notebook(self.results_frame)
+        results_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Target info
+        # Create tabs for different result types
+        summary_tab = ttk.Frame(results_notebook)
+        ports_tab = ttk.Frame(results_notebook)
+        vulns_tab = ttk.Frame(results_notebook)
+        details_tab = ttk.Frame(results_notebook)
+        
+        results_notebook.add(summary_tab, text=self.lang["results_notebook_summary"])
+        results_notebook.add(ports_tab, text=self.lang["results_notebook_ports"])
+        results_notebook.add(vulns_tab, text=self.lang["results_notebook_vulns"])
+        results_notebook.add(details_tab, text=self.lang["results_notebook_details"])
+        
+        # Summary Tab
+        summary_frame = ttk.Frame(summary_tab)
+        summary_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create summary text widget with styling
+        summary_text = tk.Text(summary_frame, wrap=tk.WORD, height=25, bg='#f0f0f0',
+                              font=('Consolas', 10), padx=10, pady=10)
+        summary_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Add scrollbar to summary text
+        summary_scroll = ttk.Scrollbar(summary_frame, command=summary_text.yview)
+        summary_text.configure(yscrollcommand=summary_scroll.set)
+        summary_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Insert summary information with styling
+        summary_text.tag_configure('header', font=('Consolas', 11, 'bold'), foreground='blue')
+        summary_text.tag_configure('important', foreground='red', font=('Consolas', 10, 'bold'))
+        summary_text.tag_configure('success', foreground='green', font=('Consolas', 10))
+        summary_text.tag_configure('info', foreground='black', font=('Consolas', 10))
+        
+        # Target Information
+        summary_text.insert(tk.END, self.lang["summary_target_info"] + "\n", 'header')
         target_info = results.get('target_info', {})
-        summary += f"{self.lang['summary_target_info']}\n"
-        summary += f"{self.lang['summary_target_type']} {target_info.get('type', 'Unknown')}\n"
         
-        if target_info.get('type') == 'ip':
-            summary += f"{self.lang['summary_ip_address']} {target_info.get('ip', 'Unknown')}\n"
-            summary += f"{self.lang['summary_hostname']} {target_info.get('hostname', 'Unknown')}\n"
-        else:
-            summary += f"{self.lang['summary_domain']} {target_info.get('domain', 'Unknown')}\n"
-            summary += f"{self.lang['summary_ip_address']} {target_info.get('ip', 'Unknown')}\n"
-        
-        # Open ports
-        open_ports = results.get('open_ports', [])
-        summary += f"\n{self.lang['summary_open_ports']}({len(open_ports)}) ==\n"
-        for port in open_ports[:10]:  # Show only first 10
-            if isinstance(port, dict):
-                summary += f"{self.lang['summary_port']} {port.get('port', '?')}: {port.get('service', 'Unknown')} {port.get('version', '')}\n"
+        if target_info:
+            if target_info.get('type') == 'ip':
+                summary_text.insert(tk.END, self.lang["summary_target_type"] + "IP Address\n", 'info')
+                summary_text.insert(tk.END, self.lang["summary_ip_address"] + target_info.get('ip', 'unknown') + "\n", 'info')
+                
+                if target_info.get('hostname'):
+                    summary_text.insert(tk.END, self.lang["summary_hostname"] + target_info.get('hostname', 'unknown') + "\n", 'info')
             else:
-                summary += f"{self.lang['summary_port']} {port}\n"
+                summary_text.insert(tk.END, self.lang["summary_target_type"] + "Domain\n", 'info')
+                summary_text.insert(tk.END, self.lang["summary_domain"] + target_info.get('domain', 'unknown') + "\n", 'info')
+                summary_text.insert(tk.END, self.lang["summary_ip_address"] + target_info.get('ip', 'unknown') + "\n", 'info')
         
-        if len(open_ports) > 10:
-            summary += f"{self.lang['summary_and_more_ports']}{len(open_ports) - 10}{self.lang['summary_more_ports']}\n"
+        # Open Ports with improved display
+        open_ports = results.get('open_ports', [])
+        summary_text.insert(tk.END, "\n" + self.lang["summary_open_ports"] + f"({len(open_ports)})\n", 'header')
         
-        # Vulnerabilities
-        vulns = results.get('vulnerabilities', [])
-        summary += f"\n{self.lang['summary_vulnerabilities']}({len(vulns)}) ==\n"
-        for vuln in vulns[:10]:  # Show only first 10
-            summary += f"{vuln.get('name', 'Unknown')} - {vuln.get('severity', 'Unknown')}\n"
+        # Show the first 10 ports in summary, then indicate if there are more
+        if open_ports:
+            for i, port in enumerate(open_ports[:10]):
+                port_info = f"{self.lang['summary_port']}{port.get('port', '?')}/{port.get('protocol', '?')} - {port.get('service', '?')}"
+                
+                if port.get('version'):
+                    port_info += f" ({port.get('version', '')})"
+                    
+                summary_text.insert(tk.END, port_info + "\n", 'info')
+                
+            if len(open_ports) > 10:
+                summary_text.insert(tk.END, self.lang["summary_and_more_ports"] + str(len(open_ports) - 10) + 
+                                  self.lang["summary_more_ports"] + "\n", 'info')
+        else:
+            summary_text.insert(tk.END, "No open ports found\n", 'info')
         
-        if len(vulns) > 10:
-            summary += f"{self.lang['summary_and_more_vulns']}{len(vulns) - 10}{self.lang['summary_more_vulns']}\n"
+        # Vulnerabilities with color coding by severity
+        vulnerabilities = results.get('vulnerabilities', [])
+        summary_text.insert(tk.END, "\n" + self.lang["summary_vulnerabilities"] + f"({len(vulnerabilities)})\n", 'header')
         
-        self.summary_text.insert(tk.END, summary)
-        self.summary_text.config(state=tk.DISABLED)
+        # Show the first 5 vulnerabilities in summary, then indicate if there are more
+        if vulnerabilities:
+            for i, vuln in enumerate(vulnerabilities[:5]):
+                vuln_info = f"{vuln.get('name', '?')} - "
+                
+                if vuln.get('severity'):
+                    if vuln.get('severity') in ['HIGH', 'CRITICAL']:
+                        summary_text.insert(tk.END, vuln_info, 'info')
+                        summary_text.insert(tk.END, f"{vuln.get('severity')} ", 'important')
+                        summary_text.insert(tk.END, f"({vuln.get('port', '?')})\n", 'info')
+                    else:
+                        summary_text.insert(tk.END, f"{vuln_info}{vuln.get('severity')} ({vuln.get('port', '?')})\n", 'info')
+                else:
+                    summary_text.insert(tk.END, f"{vuln_info}({vuln.get('port', '?')})\n", 'info')
+                    
+            if len(vulnerabilities) > 5:
+                summary_text.insert(tk.END, self.lang["summary_and_more_vulns"] + str(len(vulnerabilities) - 5) + 
+                                  self.lang["summary_more_vulns"] + "\n", 'info')
+        else:
+            summary_text.insert(tk.END, "No vulnerabilities found\n", 'info')
     
     def load_config(self):
         """Load configuration from file"""
