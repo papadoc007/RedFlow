@@ -2045,187 +2045,248 @@ class Enumeration:
 
     def prepare_exploit(self, exploit_path, target):
         """
-        Prepare an exploit for execution by copying it locally and determining how to run it
+        Prepare an exploit for use
         
         Args:
-            exploit_path (str): Path to the exploit
-            target (str): Target IP or hostname
+            exploit_path: Path of the exploit in the searchsploit database
+            target: Target IP or hostname
             
         Returns:
-            dict: Information about the prepared exploit or None if preparation failed
+            Dictionary with exploit information or None if failed
         """
-        try:
-            self.logger.info(f"Preparing exploit: {exploit_path} for target: {target}")
+        self.logger.info(f"Preparing exploit: {exploit_path} for target: {target}")
+        
+        if not exploit_path:
+            self.logger.error("No exploit path provided")
+            return None
             
-            # Initialize exploit info
-            exploit_info = {
-                "path": exploit_path,
-                "local_path": "",
-                "type": "unknown",
-                "command": "",
-                "args": []
-            }
+        # Create basename from exploit path
+        exploit_basename = os.path.basename(exploit_path)
+        exploit_name, exploit_ext = os.path.splitext(exploit_basename)
+        
+        # Determine exploit type based on extension
+        exploit_info = {
+            "path": exploit_path,
+            "local_path": "",
+            "name": exploit_name,
+            "type": "unknown"
+        }
+        
+        # Clean target string and ensure it's not empty
+        if not target or target == "localhost" or target == "127.0.0.1":
+            # Try to get target from config
+            if hasattr(self.config, 'target') and self.config.target:
+                target = self.config.target
+                
+        # Add target to exploit info
+        exploit_info["target"] = target
+        
+        # Check if exploit path contains metasploit information
+        if "metasploit" in exploit_path.lower() or "/msf/" in exploit_path.lower() or exploit_ext.lower() == ".rb":
+            exploit_info["type"] = "metasploit"
             
-            # Check if this is a Metasploit module path
-            msf_path = None
+            # Try to extract the Metasploit module path from the exploit path
+            msf_path = self._extract_metasploit_path(exploit_path)
             
-            # Check different platform paths to determine if this is a Metasploit module
-            if "/linux/local/" in exploit_path or "/unix/local/" in exploit_path:
-                # Extract module path for Metasploit
-                msf_path = self._extract_metasploit_path(exploit_path)
-                exploit_info["type"] = "metasploit"
+            if msf_path:
                 exploit_info["msf_module"] = msf_path
                 exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
                 return exploit_info
                 
-            elif "/windows/" in exploit_path:
-                # Extract module path for Metasploit
-                msf_path = self._extract_metasploit_path(exploit_path)
-                exploit_info["type"] = "metasploit"
-                exploit_info["msf_module"] = msf_path
-                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
-                return exploit_info
-                
-            elif "/unix/" in exploit_path:
-                # Extract module path for Metasploit
-                msf_path = self._extract_metasploit_path(exploit_path)
-                exploit_info["type"] = "metasploit"
-                exploit_info["msf_module"] = msf_path
-                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
-                return exploit_info
-                
-            elif "/multi/" in exploit_path:
-                # Extract module path for Metasploit
-                msf_path = self._extract_metasploit_path(exploit_path)
-                exploit_info["type"] = "metasploit"
-                exploit_info["msf_module"] = msf_path
-                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
-                return exploit_info
-            
-            # Special case for vsftpd 2.3.4 backdoor
-            elif "vsftpd" in exploit_path.lower() and "2.3.4" in exploit_path and "backdoor" in exploit_path.lower():
+        # Check if it's a special case for vsftpd 2.3.4 backdoor
+        if "vsftpd" in exploit_path.lower() and "2.3.4" in exploit_path:
+            if "17491" in exploit_path:
+                # Metasploit version
                 exploit_info["type"] = "metasploit"
                 exploit_info["msf_module"] = "unix/ftp/vsftpd_234_backdoor"
                 exploit_info["command"] = f"msfconsole -q -x 'use exploit/unix/ftp/vsftpd_234_backdoor; set RHOSTS {target}; run'"
                 return exploit_info
-                
-            # Handle non-Metasploit exploits
-            # Check if we can access the file
-            if not os.path.exists(exploit_path):
-                self.logger.warning(f"Exploit path does not exist: {exploit_path}")
-                
-                # Try to find the exploit path
-                exploit_dir = self.config.exploits_dir or "/usr/share/exploitdb/"
-                possible_path = os.path.join(exploit_dir, exploit_path.lstrip("/"))
-                
-                if os.path.exists(possible_path):
-                    exploit_path = possible_path
-                    self.logger.info(f"Found exploit at: {exploit_path}")
-                else:
-                    # If we couldn't find the file, and it looks like a Metasploit path, try to extract the module
-                    if any(x in exploit_path for x in ["unix/", "windows/", "multi/", "linux/"]):
-                        msf_path = self._extract_metasploit_path(exploit_path)
-                        if msf_path:
-                            exploit_info["type"] = "metasploit"
-                            exploit_info["msf_module"] = msf_path
-                            exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
-                            return exploit_info
-                    
-                    # Last resort: look for the file name only
-                    file_name = os.path.basename(exploit_path)
-                    for root, _, files in os.walk(exploit_dir):
-                        if file_name in files:
-                            exploit_path = os.path.join(root, file_name)
-                            self.logger.info(f"Found exploit by filename at: {exploit_path}")
-                            break
-                    
-                    if not os.path.exists(exploit_path):
-                        self.logger.error(f"Could not locate exploit file: {exploit_path}")
-                        return None
-            
-            # Copy exploit to working directory for easier use
-            exploits_folder = os.path.join(self.config.output_dir, "exploits")
-            if not os.path.exists(exploits_folder):
-                os.makedirs(exploits_folder)
-                
-            local_name = os.path.basename(exploit_path)
-            local_path = os.path.join(exploits_folder, local_name)
-            
-            # Copy the file
-            shutil.copy2(exploit_path, local_path)
-            exploit_info["local_path"] = local_path
-            
-            # Determine exploit type based on extension and content
-            extension = os.path.splitext(local_path)[1].lower()
-            
-            # First read the file to better determine the type
-            with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read(500)  # Read the first 500 characters
-            
-            # Check for different exploit types
-            if extension == ".py" or "#!/usr/bin/python" in content or "import " in content:
+            elif "49757" in exploit_path or exploit_ext.lower() == ".py":
+                # Python version
                 exploit_info["type"] = "python"
-                exploit_info["command"] = f"python {local_path} {target}"
+                # We'll try to copy it later, but set a fallback command
+                exploit_info["command"] = f"python {exploit_name}{exploit_ext} {target} 21"
+                return exploit_info
+        
+        # Try to find the exploit in the searchsploit directory
+        exploit_dir = "/usr/share/exploitdb"
+        if not os.path.exists(exploit_dir):
+            # Try alternative paths
+            alt_paths = [
+                "/opt/exploitdb",
+                "/usr/local/share/exploitdb",
+                "/usr/share/exploitdb-git"
+            ]
+            
+            for path in alt_paths:
+                if os.path.exists(path):
+                    exploit_dir = path
+                    break
+        
+        # Check if exploit_dir exists now
+        if not os.path.exists(exploit_dir):
+            self.logger.warning(f"Exploit path does not exist: {exploit_path}")
+            
+            # Try to use searchsploit -m to copy the exploit
+            try:
+                # Extract ID from the path (e.g., 12345 from /path/to/12345.py)
+                exploit_id = os.path.splitext(os.path.basename(exploit_path))[0]
+                if exploit_id.isdigit():
+                    self.logger.info(f"Attempting to copy exploit using searchsploit -m {exploit_id}")
+                    
+                    # Use searchsploit to copy the exploit
+                    command = ["searchsploit", "-m", exploit_id]
+                    result = run_tool(command, timeout=10)
+                    
+                    if result["returncode"] == 0:
+                        # Find the copied file in the current directory
+                        current_dir = os.getcwd()
+                        for file in os.listdir(current_dir):
+                            if file.startswith(exploit_id) or file.endswith(exploit_id + exploit_ext):
+                                local_path = os.path.join(current_dir, file)
+                                
+                                self.logger.info(f"Exploit copied to: {local_path}")
+                                
+                                # Update exploit info
+                                exploit_info["local_path"] = local_path
+                                
+                                # Determine command based on file extension
+                                if exploit_ext.lower() == ".py":
+                                    exploit_info["type"] = "python"
+                                    exploit_info["command"] = f"python {local_path} {target}"
+                                elif exploit_ext.lower() == ".sh":
+                                    exploit_info["type"] = "bash"
+                                    exploit_info["command"] = f"bash {local_path} {target}"
+                                elif exploit_ext.lower() == ".rb" and "metasploit" not in exploit_info["type"]:
+                                    exploit_info["type"] = "ruby"
+                                    exploit_info["command"] = f"ruby {local_path} {target}"
+                                elif exploit_ext.lower() == ".c":
+                                    exploit_info["type"] = "c"
+                                    exploit_info["command"] = f"gcc {local_path} -o {exploit_name} && ./{exploit_name} {target}"
+                                elif exploit_ext.lower() == ".php":
+                                    exploit_info["type"] = "php"
+                                    exploit_info["command"] = f"php {local_path} {target}"
+                                    
+                                return exploit_info
+            except Exception as e:
+                self.logger.error(f"Error copying exploit: {str(e)}")
                 
-            elif extension == ".rb" or "#!/usr/bin/ruby" in content or "require '" in content:
+            # Return a basic info if everything fails
+            if exploit_ext.lower() == ".py":
+                exploit_info["type"] = "python"
+                exploit_info["command"] = f"python /tmp/{exploit_basename} {target}"
+            elif exploit_ext.lower() == ".rb":
                 exploit_info["type"] = "ruby"
-                exploit_info["command"] = f"ruby {local_path} {target}"
-                
-            elif extension == ".php" or "<?php" in content:
-                exploit_info["type"] = "php"
-                exploit_info["command"] = f"php {local_path} {target}"
-                
-            elif extension == ".pl" or "#!/usr/bin/perl" in content or "use strict;" in content:
-                exploit_info["type"] = "perl"
-                exploit_info["command"] = f"perl {local_path} {target}"
-                
-            elif extension == ".c" or "#include <" in content:
-                exploit_info["type"] = "c"
-                # C files need to be compiled
-                compiled_name = os.path.splitext(local_name)[0]
-                output_path = os.path.join(exploits_folder, compiled_name)
-                exploit_info["command"] = f"gcc -o {output_path} {local_path} && {output_path} {target}"
-                
-            elif extension == ".sh" or "#!/bin/bash" in content or "#!/bin/sh" in content:
-                exploit_info["type"] = "bash"
-                exploit_info["command"] = f"chmod +x {local_path} && {local_path} {target}"
-                
-            else:
-                # Check if the file is text-based
-                try:
-                    if content and not self._is_binary(content):
-                        # It's a text file, but we don't know exactly what type
-                        # Try to identify by looking at specific patterns
-                        if any(x in content.lower() for x in ["msf", "metasploit", "msfconsole"]):
-                            # This might be a Metasploit usage guide
-                            for line in content.split('\n'):
-                                if "use " in line.lower() and ("exploit/" in line.lower() or "auxiliary/" in line.lower()):
-                                    msf_path = line.split("use ")[1].strip()
-                                    # Remove 'exploit/' prefix if present
-                                    if msf_path.startswith("exploit/"):
-                                        msf_path = msf_path[8:]
-                                    exploit_info["type"] = "metasploit"
-                                    exploit_info["msf_module"] = msf_path
-                                    exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
-                                    return exploit_info
-                        
-                        # If we can't determine a specific type, just set as "text"
-                        exploit_info["type"] = "text"
-                        exploit_info["command"] = f"cat {local_path}"
-                    else:
-                        # Binary file
-                        exploit_info["type"] = "binary"
-                        exploit_info["command"] = f"chmod +x {local_path} && {local_path} {target}"
-                except:
-                    # If we can't determine, just try to run it
-                    exploit_info["type"] = "unknown"
-                    exploit_info["command"] = f"chmod +x {local_path} && {local_path} {target}"
+                exploit_info["command"] = f"ruby /tmp/{exploit_basename} {target}"
+            
+            # Set fallback local path
+            exploit_info["local_path"] = f"/tmp/{exploit_basename}"
             
             return exploit_info
                 
+        # Full path to the exploit
+        full_path = os.path.join(exploit_dir, exploit_path)
+        
+        if os.path.exists(full_path):
+            self.logger.info(f"Found exploit at: {full_path}")
+            
+            # Set the local path
+            exploit_info["local_path"] = full_path
+            
+            # Determine exploit type by extension
+            if exploit_ext.lower() == ".py":
+                exploit_info["type"] = "python"
+                exploit_info["command"] = f"python {full_path} {target}"
+            elif exploit_ext.lower() == ".sh":
+                exploit_info["type"] = "bash"
+                exploit_info["command"] = f"bash {full_path} {target}"
+            elif exploit_ext.lower() == ".rb" and "metasploit" not in exploit_info["type"]:
+                exploit_info["type"] = "ruby"
+                exploit_info["command"] = f"ruby {full_path} {target}"
+            elif exploit_ext.lower() == ".c":
+                exploit_info["type"] = "c"
+                exploit_info["command"] = f"gcc {full_path} -o {exploit_name} && ./{exploit_name} {target}"
+            elif exploit_ext.lower() == ".php":
+                exploit_info["type"] = "php"
+                exploit_info["command"] = f"php {full_path} {target}"
+                
+            return exploit_info
+            
+        # Try to find the exploit by traversing the exploit directory
+        for root, dirs, files in os.walk(exploit_dir):
+            for file in files:
+                if exploit_basename == file:
+                    full_path = os.path.join(root, file)
+                    self.logger.info(f"Found exploit at: {full_path}")
+                    
+                    # Set the local path
+                    exploit_info["local_path"] = full_path
+                    
+                    # Determine exploit type by extension
+                    if exploit_ext.lower() == ".py":
+                        exploit_info["type"] = "python"
+                        exploit_info["command"] = f"python {full_path} {target}"
+                    elif exploit_ext.lower() == ".sh":
+                        exploit_info["type"] = "bash"
+                        exploit_info["command"] = f"bash {full_path} {target}"
+                    elif exploit_ext.lower() == ".rb" and "metasploit" not in exploit_info["type"]:
+                        exploit_info["type"] = "ruby"
+                        exploit_info["command"] = f"ruby {full_path} {target}"
+                    elif exploit_ext.lower() == ".c":
+                        exploit_info["type"] = "c"
+                        exploit_info["command"] = f"gcc {full_path} -o {exploit_name} && ./{exploit_name} {target}"
+                    elif exploit_ext.lower() == ".php":
+                        exploit_info["type"] = "php"
+                        exploit_info["command"] = f"php {full_path} {target}"
+                        
+                    return exploit_info
+        
+        # Try to use searchsploit -m as fallback
+        try:
+            # Extract ID from the path (e.g., 12345 from /path/to/12345.py)
+            exploit_id = os.path.splitext(os.path.basename(exploit_path))[0]
+            if exploit_id.isdigit():
+                self.logger.info(f"Attempting to copy exploit using searchsploit -m {exploit_id}")
+                
+                # Use searchsploit to copy the exploit
+                command = ["searchsploit", "-m", exploit_id]
+                result = run_tool(command, timeout=10)
+                
+                if result["returncode"] == 0:
+                    # Find the copied file in the current directory
+                    current_dir = os.getcwd()
+                    for file in os.listdir(current_dir):
+                        if file.startswith(exploit_id) or file == exploit_basename:
+                            local_path = os.path.join(current_dir, file)
+                            
+                            self.logger.info(f"Exploit copied to: {local_path}")
+                            
+                            # Update exploit info
+                            exploit_info["local_path"] = local_path
+                            
+                            # Determine command based on file extension
+                            if exploit_ext.lower() == ".py":
+                                exploit_info["type"] = "python"
+                                exploit_info["command"] = f"python {local_path} {target}"
+                            elif exploit_ext.lower() == ".sh":
+                                exploit_info["type"] = "bash"
+                                exploit_info["command"] = f"bash {local_path} {target}"
+                            elif exploit_ext.lower() == ".rb" and "metasploit" not in exploit_info["type"]:
+                                exploit_info["type"] = "ruby"
+                                exploit_info["command"] = f"ruby {local_path} {target}"
+                            elif exploit_ext.lower() == ".c":
+                                exploit_info["type"] = "c"
+                                exploit_info["command"] = f"gcc {local_path} -o {exploit_name} && ./{exploit_name} {target}"
+                            elif exploit_ext.lower() == ".php":
+                                exploit_info["type"] = "php"
+                                exploit_info["command"] = f"php {local_path} {target}"
+                                
+                            return exploit_info
         except Exception as e:
-            self.logger.error(f"Error preparing exploit: {str(e)}")
-            return None
+            self.logger.error(f"Error copying exploit: {str(e)}")
+        
+        self.logger.error("Error preparing exploit: Could not find exploit file")
+        return exploit_info
 
     def _is_binary(self, content):
         """
