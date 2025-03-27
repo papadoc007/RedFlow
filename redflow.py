@@ -10,6 +10,8 @@ import argparse
 import os
 import sys
 import logging
+import re
+import socket
 from rich.console import Console
 from rich.logging import RichHandler
 
@@ -176,6 +178,14 @@ def parse_args():
         dest="run_msfconsole",
         action="store_true",
         help="Start Metasploit console directly and optionally target a specific IP"
+    )
+    
+    # Add new argument for interactive menu
+    parser.add_argument(
+        "--menu",
+        dest="interactive_menu",
+        action="store_true",
+        help="Launch interactive menu-driven interface"
     )
     
     return parser.parse_args()
@@ -451,62 +461,222 @@ def handle_exploit_operations(args, logger, console):
         console.print("Or use --search-exploits SERVICE:VERSION to search for exploits")
         console.print("Or use --service-to-exploit SERVICE --port-to-exploit PORT to exploit a specific service")
 
-def main():
-    """Main program function // הפונקציה הראשית של התוכנית"""
-    args = parse_args()
+def is_valid_ip(ip):
+    """
+    Validate if the string is a valid IP address
     
-    # Create project directory and initialize log files
-    if args.target:
-        project_dir = init_project_dir(args.target, args.output)
-    else:
-        # For file operations, we might not have a target
-        project_dir = args.results_dir or os.path.expanduser(args.output)
-        if not os.path.exists(project_dir):
-            os.makedirs(project_dir, exist_ok=True)
-    
-    logger = setup_logger(project_dir, args.verbose)
-    console = Console()
-    
+    Args:
+        ip (str): IP address to validate
+        
+    Returns:
+        bool: True if valid IP address, False otherwise
+    """
     try:
-        # Check if we're doing file operations instead of a scan
-        if args.list_files or args.download_url or args.view_url or args.interactive_download:
-            handle_file_operations(args, logger, console)
+        # Simple pattern for IPv4 validation
+        pattern = r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$'
+        match = re.match(pattern, ip)
+        
+        if not match:
+            return False
+            
+        # Validate each octet
+        for octet in match.groups():
+            if int(octet) > 255:
+                return False
+                
+        return True
+    except:
+        return False
+
+def is_valid_domain(domain):
+    """
+    Validate if the string is a potentially valid domain name
+    
+    Args:
+        domain (str): Domain name to validate
+        
+    Returns:
+        bool: True if potentially valid domain name, False otherwise
+    """
+    try:
+        # Simple pattern for domain validation
+        pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+        
+        if re.match(pattern, domain):
+            return True
+            
+        # Try to resolve the domain as a fallback
+        socket.gethostbyname(domain)
+        return True
+    except:
+        return False
+
+# Add new function for interactive menu
+def interactive_menu():
+    """
+    Interactive menu-driven interface for RedFlow
+    
+    Returns:
+        argparse.Namespace: Arguments namespace with user selections
+    """
+    console = Console()
+    console.print("\n[bold blue]=====================================[/bold blue]")
+    console.print("[bold blue]     RedFlow Interactive Menu       [/bold blue]")
+    console.print("[bold blue]=====================================[/bold blue]\n")
+    
+    # Create an empty args object
+    args = argparse.Namespace()
+    
+    # Step 1: Target Selection
+    console.print("[bold cyan]Step 1: Target Selection[/bold cyan]")
+    target_type = console.input("[green]Choose target type ([white]1[/white]: IP Address, [white]2[/white]: Domain): [/green]")
+    
+    if target_type == "1":
+        while True:
+            target = console.input("[green]Enter IP address: [/green]")
+            if is_valid_ip(target):
+                break
+            else:
+                console.print("[red]Invalid IP address. Please try again.[/red]")
+    else:
+        while True:
+            target = console.input("[green]Enter domain name: [/green]")
+            if is_valid_domain(target):
+                break
+            else:
+                console.print("[red]Invalid domain name. Please try again.[/red]")
+    
+    args.target = target
+    
+    # Step 2: Port Selection
+    console.print("\n[bold cyan]Step 2: Port Selection[/bold cyan]")
+    port_option = console.input("[green]Choose port option ([white]1[/white]: Specific port, [white]2[/white]: All ports): [/green]")
+    
+    if port_option == "1":
+        while True:
+            try:
+                port = int(console.input("[green]Enter port number: [/green]"))
+                if 1 <= port <= 65535:
+                    args.specific_port = port
+                    break
+                else:
+                    console.print("[red]Port must be between 1 and 65535.[/red]")
+            except ValueError:
+                console.print("[red]Please enter a valid number.[/red]")
+    else:
+        args.specific_port = None
+    
+    # Step 3: Scan Mode
+    console.print("\n[bold cyan]Step 3: Scan Mode[/bold cyan]")
+    console.print("[white]Available scan modes:[/white]")
+    console.print("  [white]1[/white]: Passive - Gathers information without direct interaction")
+    console.print("  [white]2[/white]: Active - Port scanning and basic service detection")
+    console.print("  [white]3[/white]: Full - Complete scan including vulnerability detection")
+    console.print("  [white]4[/white]: Quick - Fast scan focusing on open ports")
+    
+    scan_mode = console.input("[green]Choose scan mode [1-4]: [/green]")
+    if scan_mode == "1":
+        args.mode = "passive"
+    elif scan_mode == "2":
+        args.mode = "active"
+    elif scan_mode == "4":
+        args.mode = "quick"
+    else:
+        args.mode = "full"  # Default to full
+    
+    # Step 4: Additional Options
+    console.print("\n[bold cyan]Step 4: Additional Options[/bold cyan]")
+    
+    # Interactive mode
+    interactive = console.input("[green]Enable interactive mode (confirm before proceeding)? (y/n): [/green]").lower()
+    args.interactive = interactive.startswith("y")
+    
+    # Verbose output
+    verbose = console.input("[green]Enable verbose output? (y/n): [/green]").lower()
+    args.verbose = verbose.startswith("y")
+    
+    # GPT integration
+    gpt = console.input("[green]Use GPT for analysis (requires API key)? (y/n): [/green]").lower()
+    args.use_gpt = gpt.startswith("y")
+    
+    # Output directory
+    default_output = "./scans/"
+    output_dir = console.input(f"[green]Enter output directory (default: {default_output}): [/green]")
+    args.output = output_dir if output_dir else default_output
+    
+    # Display summary of selections
+    console.print("\n[bold cyan]Configuration Summary:[/bold cyan]")
+    console.print(f"Target: [white]{args.target}[/white]")
+    console.print(f"Port: [white]{args.specific_port if args.specific_port else 'All ports'}[/white]")
+    console.print(f"Scan Mode: [white]{args.mode}[/white]")
+    console.print(f"Interactive Mode: [white]{'Enabled' if args.interactive else 'Disabled'}[/white]")
+    console.print(f"Verbose Output: [white]{'Enabled' if args.verbose else 'Disabled'}[/white]")
+    console.print(f"GPT Analysis: [white]{'Enabled' if args.use_gpt else 'Disabled'}[/white]")
+    console.print(f"Output Directory: [white]{args.output}[/white]")
+    
+    # Confirm and return
+    confirm = console.input("\n[green]Proceed with these settings? (y/n): [/green]").lower()
+    if not confirm.startswith("y"):
+        console.print("[yellow]Configuration cancelled. Exiting...[/yellow]")
+        sys.exit(0)
+    
+    return args
+
+def main():
+    """Main execution function // פונקציית ביצוע ראשית"""
+    try:
+        # Parse command-line arguments
+        args = parse_args()
+        
+        # Check if interactive menu was requested
+        if hasattr(args, 'interactive_menu') and args.interactive_menu:
+            args = interactive_menu()
+        
+        # Check requirements
+        check_requirements()
+        
+        # File operations
+        if args.list_files or args.interactive_download or args.download_url or args.view_url:
+            handle_file_operations(args, get_logger(), Console())
+            return
+            
+        # Exploit operations
+        if args.exploit_menu or args.search_exploits or args.service_to_exploit or args.port_to_exploit or args.run_msfconsole:
+            handle_exploit_operations(args, get_logger(), Console())
             return
         
-        # Check if we're doing exploit operations
-        if args.exploit_menu or args.search_exploits or args.service_to_exploit or args.run_msfconsole:
-            handle_exploit_operations(args, logger, console)
-            return
-        
-        # Make sure we have a target for regular scanning
+        # Validate target for regular scanning
         if not args.target:
-            logger.error("Target is required for scanning. Use --target option.")
-            console.print("[bold red]Target is required for scanning. Use --target option.[/bold red]")
-            console.print("For file operations on previous scans, use --list-files, --download, --interactive-download, or --view")
-            console.print("For exploit operations, use --exploit-menu, --search-exploits, or --service-to-exploit")
-            console.print("To start msfconsole directly, use --msfconsole")
+            logger = get_logger()
+            console = Console()
+            logger.error("No target specified")
+            console.print("[bold red]Error:[/bold red] No target specified. Use --target to specify a target or --help for more information.")
             return
+            
+        # Initialize project directory
+        project_dir = init_project_dir(args.target, args.output)
         
-        # Check system requirements
-        check_requirements(logger)
+        # Setup logger
+        logger = setup_logger(project_dir, args.verbose)
+        logger.info(f"RedFlow initialized. Version: {__version__}")
         
-        # Initialize configuration
+        # Create configuration object
         config = Config(args, project_dir)
         
-        # Create scanner
-        scanner = Scanner(config, logger, console)
+        # Create scanner object
+        scanner = Scanner(config, logger, Console())
         
-        # Start scanning
+        # Start scan process
         scanner.start()
         
     except KeyboardInterrupt:
+        logger = get_logger()
         logger.info("RedFlow manually stopped by user")
-        console.print("[bold red]RedFlow manually stopped by user[/bold red]")
-        sys.exit(1)
+        Console().print("\n[bold yellow]RedFlow manually stopped by user[/bold yellow]")
     except Exception as e:
-        logger.exception(f"Unexpected error: {str(e)}")
-        console.print(f"[bold red]Unexpected error: {str(e)}[/bold red]")
-        sys.exit(1)
-
+        logger = get_logger()
+        logger.error(f"An unexpected error occurred: {str(e)}")
+        Console().print(f"\n[bold red]Error:[/bold red] An unexpected error occurred: {str(e)}")
+        
 if __name__ == "__main__":
     main() 

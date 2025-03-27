@@ -466,4 +466,30 @@ In the latest release, the following improvements have been made / בגרסה ה
    / **שיפור אינטגרציה עם Metasploit** - משוב טוב יותר ומנגנוני ניסיון נוסף למודולים של Metasploit
 
 4. **Improved GUI results display** - Results are now displayed with better formatting and color-coding in the GUI
-   / **שיפור תצוגת תוצאות בממשק הגרפי** - התוצאות כעת מוצגות עם עיצוב טוב יותר וקידוד צבעים בממשק הגרפי 
+   / **שיפור תצוגת תוצאות בממשק הגרפי** - התוצאות כעת מוצגות עם עיצוב טוב יותר וקידוד צבעים בממשק הגרפי
+
+5. **New interactive menu interface** - Added a step-by-step guided menu interface for easier tool usage
+   / **ממשק תפריט אינטראקטיבי חדש** - נוסף ממשק תפריט מונחה שלב-אחר-שלב לשימוש קל יותר בכלי
+
+6. **Special handling for problematic exploits** - Added custom handlers for known problematic exploits like vsftpd 2.3.4
+   / **טיפול מיוחד לאקספלויטים בעייתיים** - נוספו מטפלים מותאמים לאקספלויטים בעייתיים ידועים כמו vsftpd 2.3.4
+
+### Using the new menu interface / שימוש בממשק התפריט החדש
+
+To use the new interactive menu interface, simply run:
+כדי להשתמש בממשק התפריט האינטראקטיבי החדש, פשוט הרץ:
+
+```bash
+python redflow.py --menu
+```
+
+This will guide you through a step-by-step process to:
+זה ינחה אותך בתהליך שלב-אחר-שלב:
+
+1. Select target type (IP address or domain)
+2. Choose specific port or scan all ports
+3. Select scan mode (passive, active, full, or quick)
+4. Configure additional options
+
+The menu provides a more user-friendly way to use RedFlow, especially for new users.
+התפריט מספק דרך ידידותית יותר להשתמש ב-RedFlow, במיוחד למשתמשים חדשים. 
