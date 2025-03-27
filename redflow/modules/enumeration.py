@@ -762,8 +762,21 @@ class Enumeration:
         
         for db_service in db_services:
             port = db_service["port"]
-            service_name = db_service["service"].lower()
+            service_name = db_service.get("name", "").lower() if "name" in db_service else "" 
             version = db_service.get("version", "")
+            
+            if not service_name:
+                if port == "3306":
+                    service_name = "mysql"
+                elif port == "5432":
+                    service_name = "postgresql"
+                elif port == "1433":
+                    service_name = "mssql"
+                elif port == "1521":
+                    service_name = "oracle"
+                else:
+                    self.logger.warning(f"Unknown database service on port {port}, skipping")
+                    continue
             
             db_info = {
                 "port": port,
