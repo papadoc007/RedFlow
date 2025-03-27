@@ -2844,39 +2844,44 @@ class Enumeration:
 
     def interactive_exploit_menu(self, service_name, product_name, version, target):
         """
-        תפריט אינטראקטיבי לניצול פגיעויות
+        Interactive menu for exploiting vulnerabilities
         
         Args:
-            service_name: שם השירות
-            product_name: שם המוצר
-            version: גרסת המוצר
-            target: כתובת המטרה
+            service_name: Service name
+            product_name: Product name
+            version: Product version
+            target: Target address
         """
-        self.logger.info(f"מפעיל תפריט ניצול עבור {service_name} {version}")
+        self.logger.info(f"Starting exploit menu for {service_name} {version}")
         
-        # בדיקה אם המטרה היא localhost ובקשת כתובת IP תקפה
+        # Check if target is localhost and request valid IP
         target = self.get_target_ip(target)
         if not target:
             return
         
-        # חיפוש פגיעויות באמצעות searchsploit
+        # Search for vulnerabilities using searchsploit
         vulnerabilities = self.find_vulnerabilities_with_searchsploit(product_name, version)
         
-        if not vulnerabilities:
-            self.console.print("[yellow]לא נמצאו פגיעויות ידועות. האם תרצה לנסות חיפוש מותאם אישית?[/yellow] (y/n)")
+        if not vulnerabilities or not isinstance(vulnerabilities, list):
+            self.console.print("[yellow]No known vulnerabilities found. Would you like to try a custom search?[/yellow] (y/n)")
             response = input("> ").strip().lower()
             
             if response in ["y", "yes", ""]:
-                self.console.print("[cyan]הזן מונח חיפוש (למשל: vsftpd):[/cyan]")
+                self.console.print("[cyan]Enter search term (e.g., vsftpd):[/cyan]")
                 search_term = input("> ").strip()
                 vulnerabilities = self.find_vulnerabilities_with_searchsploit(search_term)
         
-        if vulnerabilities:
-            self.console.print("\n[bold blue]פגיעויות שנמצאו:[/bold blue]")
+        if vulnerabilities and isinstance(vulnerabilities, list):
+            self.console.print("\n[bold blue]Found Vulnerabilities:[/bold blue]")
             for i, vuln in enumerate(vulnerabilities, 1):
-                self.console.print(f"{i}. {vuln['title']} ({vuln['path']})")
+                if isinstance(vuln, dict):
+                    title = vuln.get('title', 'Unknown Title')
+                    path = vuln.get('path', 'Path not available')
+                    self.console.print(f"{i}. {title} ({path})")
+                elif isinstance(vuln, str):
+                    self.console.print(f"{i}. {vuln}")
             
-            self.console.print("\n[cyan]בחר מספר פגיעות לניצול (או 'q' ליציאה):[/cyan]")
+            self.console.print("\n[cyan]Select vulnerability number to exploit (or 'q' to quit):[/cyan]")
             choice = input("> ").strip()
             
             if choice.lower() != 'q':
@@ -2884,10 +2889,13 @@ class Enumeration:
                     index = int(choice) - 1
                     if 0 <= index < len(vulnerabilities):
                         selected_vuln = vulnerabilities[index]
-                        self.display_exploit_instructions(selected_vuln, target)
+                        if isinstance(selected_vuln, dict):
+                            self.display_exploit_instructions(selected_vuln, target)
+                        else:
+                            self.console.print(f"[yellow]Selected vulnerability info: {selected_vuln}[/yellow]")
                     else:
-                        self.console.print("[red]בחירה לא תקפה[/red]")
+                        self.console.print("[red]Invalid selection[/red]")
                 except ValueError:
-                    self.console.print("[red]בחירה לא תקפה[/red]")
+                    self.console.print("[red]Invalid selection[/red]")
         else:
-            self.console.print("[yellow]לא נמצאו פגיעויות[/yellow]")
+            self.console.print("[yellow]No vulnerabilities found[/yellow]")
