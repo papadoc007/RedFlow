@@ -38,9 +38,9 @@ def parse_args():
     parser.add_argument(
         "--mode", "-m",
         dest="mode",
-        choices=["passive", "active", "full"],
+        choices=["passive", "active", "full", "quick"],
         default="full",
-        help="Scan mode (passive, active, or full)"
+        help="Scan mode (passive, active, full, or quick - quick performs port scan and directory enumeration without vulnerability checks)"
     )
     
     parser.add_argument(

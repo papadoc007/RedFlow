@@ -2726,3 +2726,100 @@ class Enumeration:
                     self.console.print("[red]Invalid selection[/red]")
         else:
             self.console.print("[yellow]No vulnerabilities found[/yellow]")
+
+    def run_web_enumeration(self, web_services):
+        """
+        Run web service enumeration only - for quick mode
+        // הפעלת תשאול שירותי web בלבד - למצב מהיר
+        
+        Args:
+            web_services: List of web services to enumerate
+            
+        Returns:
+            Web enumeration results
+        """
+        self.logger.info(f"Starting web service enumeration for {self.target}")
+        
+        # Create progress display
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            console=self.console
+        ) as progress:
+            web_task = progress.add_task("[cyan]Performing Web service enumeration...", total=1)
+            self._enumerate_web(web_services, quick_mode=True)
+            progress.update(web_task, completed=1)
+        
+        return self.results["web"]
+
+    def _enumerate_web(self, web_services, quick_mode=False):
+        """
+        Perform web service enumeration
+        // ביצוע תשאול שירותי web
+        
+        Args:
+            web_services: List of web services
+            quick_mode: If True, only perform directory enumeration without vulnerability scanning
+        """
+        self.logger.info(f"Performing Web enumeration for {self.target}")
+        
+        for service in web_services:
+            port = service.get("port", 80)
+            is_https = service.get("name", "").lower() == "https"
+            protocol = "https" if is_https else "http"
+            base_url = f"{protocol}://{self.target}:{port}"
+            
+            try:
+                # Run gobuster for directory enumeration
+                self.logger.info(f"Running gobuster against {base_url}/")
+                gobuster_cmd = [
+                    "gobuster", "dir",
+                    "-u", base_url,
+                    "-w", "/usr/share/wordlists/dirb/common.txt",
+                    "-t", "50",
+                    "-q"
+                ]
+                
+                if is_https:
+                    gobuster_cmd.extend(["-k"])
+                
+                result = run_tool(gobuster_cmd)
+                
+                if result.returncode == 0:
+                    # Parse gobuster output
+                    directories = []
+                    files = []
+                    
+                    for line in result.stdout.decode().splitlines():
+                        if line.strip():
+                            path = line.split()[0]
+                            if path.endswith("/"):
+                                directories.append(path)
+                            else:
+                                files.append(path)
+                    
+                    self.results["web"][f"{protocol}_{port}"] = {
+                        "directories": directories,
+                        "files": files
+                    }
+                    
+                    self.logger.info(f"Found {len(directories)} directories and {len(files)} files")
+                
+                if not quick_mode:
+                    # Run nikto vulnerability scan
+                    self.logger.info(f"Running nikto vulnerability scan against {base_url}/")
+                    nikto_cmd = ["nikto", "-h", base_url, "-nointeractive"]
+                    
+                    if is_https:
+                        nikto_cmd.extend(["-ssl"])
+                    
+                    result = run_tool(nikto_cmd)
+                    
+                    if result.returncode == 0:
+                        self.results["web"][f"{protocol}_{port}"]["nikto"] = result.stdout.decode()
+            
+            except Exception as e:
+                self.logger.error(f"Error during web enumeration: {str(e)}")
+                continue

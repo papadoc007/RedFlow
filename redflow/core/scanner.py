@@ -158,7 +158,7 @@ class Scanner:
                 self.finish()
                 return
         
-        if self.config.mode in ["active", "full"]:
+        if self.config.mode in ["active", "full", "quick"]:
             self.logger.info(f"Starting active information gathering for {self.config.target}")
             self.console.print("[bold blue]== Active Information Gathering ==[/bold blue]")
             
@@ -174,6 +174,22 @@ class Scanner:
             self.results["open_ports"] = active_results.get("open_ports", [])
             self.results["discovered_services"] = active_results.get("discovered_services", [])
             self.save_results()
+
+            # For quick mode, only perform directory enumeration for web services
+            if self.config.mode == "quick":
+                self.logger.info(f"Quick mode: Starting directory enumeration for web services")
+                self.console.print("[bold blue]== Directory Enumeration ==[/bold blue]")
+                
+                web_services = [service for service in self.results["discovered_services"] 
+                              if service.get("service", "").lower() in ["http", "https"]]
+                
+                if web_services:
+                    enum_results = self.enumeration.run_web_enumeration(web_services)
+                    self.results["enumeration"] = {"web": enum_results}
+                    self.save_results()
+                
+                self.finish()
+                return
             
             # If there's a specific port and it was found open, jump to exploit menu
             if hasattr(self.config, 'specific_port') and self.config.specific_port:
