@@ -190,6 +190,15 @@ class Scanner:
             self.results["exploitation"] = exploit_results
             self.results["vulnerabilities"] = exploit_results.get("vulnerabilities", [])
             self.save_results()
+            
+            # Ask user if they want to launch the interactive exploit menu
+            if self.config.interactive:
+                self.console.print("\n[bold yellow]Would you like to launch the interactive exploit menu?[/bold yellow] (y/n)")
+                response = input("> ").strip().lower()
+                
+                if response in ["y", "yes", ""]:
+                    self.console.print("[bold blue]== Interactive Exploit Menu ==[/bold blue]")
+                    self.exploitation.interactive_exploit_launcher()
         
         # Generate final report
         self.finish()

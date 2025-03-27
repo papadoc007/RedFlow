@@ -1390,24 +1390,25 @@ class Enumeration:
             return downloaded_files
         
         # Display discovered files and directories for selection
-        self.console.print(f"\n[bold cyan]Files discovered on {protocol}://{target}:{port_str}[/bold cyan]")
+        self.console.print(f"\n[bold cyan]קבצים שהתגלו ב-{protocol}://{target}:{port_str}[/bold cyan]")
         
         all_paths = []
         
         if web_files:
-            self.console.print(f"\n[bold green]Files ({len(web_files)}):[/bold green]")
+            self.console.print(f"\n[bold green]קבצים ({len(web_files)}):[/bold green]")
             for i, file in enumerate(web_files, 1):
                 self.console.print(f"  {i}. {file}")
                 all_paths.append({"type": "file", "path": file})
         
         if web_dirs:
-            self.console.print(f"\n[bold green]Directories ({len(web_dirs)}):[/bold green]")
+            self.console.print(f"\n[bold green]תיקיות ({len(web_dirs)}):[/bold green]")
             for i, directory in enumerate(web_dirs, len(web_files) + 1):
                 self.console.print(f"  {i}. {directory}")
                 all_paths.append({"type": "directory", "path": directory})
         
-        # Ask user which files to download
-        self.console.print("\n[bold]Enter the numbers of files/directories to download (comma-separated, 'all' for all files, or 'none' to skip):[/bold]")
+        # Ask user which files to download or directories to scan deeper
+        self.console.print("\n[bold]בחר קבצים להורדה או תיקיות לסריקה עמוקה יותר:[/bold]")
+        self.console.print("[bold]הזן מספרים מופרדים בפסיקים, 'all' לכל הקבצים, 'none' לדלג, או 'scan X' לסריקה עמוקה של תיקייה מספר X[/bold]")
         
         # Interactive mode requires input from user
         try:
@@ -1416,14 +1417,55 @@ class Enumeration:
             if selection == "all":
                 indices = list(range(1, len(all_paths) + 1))
             elif selection == "none" or not selection:
-                self.console.print("[yellow]No files selected for download[/yellow]")
+                self.console.print("[yellow]לא נבחרו קבצים להורדה[/yellow]")
                 return downloaded_files
+            elif selection.startswith("scan "):
+                # Parse directory to scan
+                try:
+                    dir_idx = int(selection.split("scan ")[1].strip())
+                    if 1 <= dir_idx <= len(all_paths) and all_paths[dir_idx-1]["type"] == "directory":
+                        dir_path = all_paths[dir_idx-1]["path"]
+                        
+                        # Perform recursive scan on this directory
+                        self.console.print(f"[bold cyan]מבצע סריקה עמוקה של התיקייה: {dir_path}[/bold cyan]")
+                        scan_results = self.scan_directory_recursively(target, port_str, protocol, dir_path)
+                        
+                        # Display results and update our data
+                        new_files = [f for f in scan_results["files"] if f not in web_files]
+                        new_dirs = [d for d in scan_results["directories"] if d not in web_dirs]
+                        
+                        if new_files or new_dirs:
+                            # Update the web_info and results
+                            web_files.extend(new_files)
+                            web_dirs.extend(new_dirs)
+                            
+                            # Update in our results structure
+                            for web_result in self.results["web"]:
+                                if str(web_result.get("port", "")) == port_str and web_result.get("protocol", "") == protocol:
+                                    web_result["files"].extend(new_files)
+                                    web_result["directories"].extend(new_dirs)
+                                    break
+                            
+                            # Call this function again to display the updated list
+                            self.console.print(f"[green]נמצאו {len(new_files)} קבצים חדשים ו-{len(new_dirs)} תיקיות חדשות![/green]")
+                            self.console.print("[yellow]הצגת רשימה מעודכנת של קבצים ותיקיות...[/yellow]")
+                            return self.interactive_download_files(target, port_str, protocol)
+                        else:
+                            self.console.print("[yellow]לא נמצאו קבצים או תיקיות נוספים[/yellow]")
+                            # Continue with the current list
+                            return self.interactive_download_files(target, port_str, protocol)
+                    else:
+                        self.console.print("[red]מספר תיקייה לא חוקי. אנא בחר מספר תיקייה מהרשימה.[/red]")
+                        return self.interactive_download_files(target, port_str, protocol)
+                except ValueError:
+                    self.console.print("[red]פורמט לא חוקי. השתמש ב-'scan X' כאשר X הוא מספר התיקייה.[/red]")
+                    return self.interactive_download_files(target, port_str, protocol)
             else:
                 # Parse user selection
                 try:
                     indices = [int(idx.strip()) for idx in selection.split(",") if idx.strip()]
                 except ValueError:
-                    self.console.print("[red]Invalid input. Please enter numbers separated by commas.[/red]")
+                    self.console.print("[red]קלט לא חוקי. אנא הזן מספרים מופרדים בפסיקים.[/red]")
                     return downloaded_files
             
             # Download selected files
@@ -1431,7 +1473,7 @@ class Enumeration:
             target_dir = os.path.join(self.config.output_dir, "downloads", f"{protocol}_{port_str}")
             os.makedirs(target_dir, exist_ok=True)
             
-            self.console.print(f"[cyan]Files will be downloaded to: {target_dir}[/cyan]")
+            self.console.print(f"[cyan]הקבצים יורדו אל: {target_dir}[/cyan]")
             
             total_success = 0
             total_failed = 0
@@ -1567,3 +1609,1117 @@ class Enumeration:
         except KeyboardInterrupt:
             self.console.print("\n[yellow]Download operation cancelled by user[/yellow]")
             return downloaded_files 
+
+    def scan_directory_recursively(self, target, port, protocol, directory_path):
+        """
+        סריקה רקורסיבית של תיקייה לאיתור קבצים ותיקיות משנה
+        
+        Args:
+            target (str): כתובת IP או שם מארח
+            port (int או str): פורט של שירות האינטרנט
+            protocol (str): פרוטוקול (http או https)
+            directory_path (str): נתיב התיקייה לסריקה
+            
+        Returns:
+            dict: מילון עם קבצים ותיקיות שנמצאו
+        """
+        result = {
+            "directories": [],
+            "files": []
+        }
+        
+        self.console.print(f"[bold cyan]מבצע סריקה עמוקה של התיקייה: {directory_path}[/bold cyan]")
+        
+        # יצירת כתובת URL של היעד
+        base_url = f"{protocol}://{target}:{port}"
+        target_url = f"{base_url}{directory_path}"
+        if not target_url.endswith('/'):
+            target_url += '/'
+        
+        # ניסיון להפעיל סריקת gobuster מהירה על התיקייה
+        try:
+            # בחירת קובץ מילים לסריקת תיקיות
+            wordlist = self.config.wordlist_paths.get("dirb_common")
+            if not os.path.exists(wordlist):
+                # אם קובץ המילים לא נמצא, ננסה למצוא אחר
+                for key, wl_path in self.config.wordlist_paths.items():
+                    if os.path.exists(wl_path) and "dir" in key:
+                        wordlist = wl_path
+                        break
+            
+            if not wordlist or not os.path.exists(wordlist):
+                self.console.print("[yellow]לא נמצא קובץ מילים מתאים לסריקת התיקייה[/yellow]")
+                return result
+            
+            self.console.print(f"[cyan]הפעלת סריקת gobuster על התיקייה {target_url}...[/cyan]")
+            
+            # יצירת קובץ פלט זמני
+            output_file = os.path.join(self.config.output_dir, f"gobuster_recursive_{port}_{directory_path.replace('/', '_')}.txt")
+            
+            # בניית פקודת gobuster
+            cmd = [
+                "gobuster", "dir",
+                "-u", target_url,
+                "-w", wordlist,
+                "-o", output_file,
+                "-t", str(self.config.tool_settings["gobuster"]["threads"])
+            ]
+            
+            # אם HTTPS, הוספת פרמטר לדילוג על אימות SSL
+            if protocol == "https":
+                cmd.extend(["-k"])
+            
+            # הפעלת gobuster
+            import subprocess
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            self.console.print("[cyan]מבצע סריקה, אנא המתן...[/cyan]")
+            stdout, stderr = process.communicate(timeout=120)  # הגבלה ל-2 דקות
+            
+            # ניתוח תוצאות
+            if os.path.exists(output_file):
+                with open(output_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    
+                    for line in lines:
+                        if line.startswith("/") or "(Status:" in line:
+                            parts = line.split("(Status:")
+                            if len(parts) > 1:
+                                path = parts[0].strip()
+                                status = parts[1].split(")")[0].strip()
+                                
+                                # נוסיף רק פריטים עם קודי סטטוס 2xx או 3xx
+                                if status.startswith("2") or status.startswith("3"):
+                                    full_path = directory_path
+                                    if not full_path.endswith('/'):
+                                        full_path += '/'
+                                    if path.startswith('/'):
+                                        path = path[1:]
+                                    full_path += path
+                                    
+                                    if path.endswith("/"):
+                                        result["directories"].append(full_path)
+                                    else:
+                                        result["files"].append(full_path)
+                
+                self.console.print(f"[green]נמצאו {len(result['directories'])} תיקיות ו-{len(result['files'])} קבצים בתיקיית {directory_path}[/green]")
+        except Exception as e:
+            self.console.print(f"[red]שגיאה בסריקת התיקייה {directory_path}: {str(e)}[/red]")
+        
+        return result 
+
+    def find_vulnerabilities_with_searchsploit(self, service_name, version):
+        """
+        חיפוש פגיעויות אפשריות באמצעות searchsploit
+        
+        Args:
+            service_name (str): שם השירות (למשל vsftpd, apache)
+            version (str): גרסת השירות
+            
+        Returns:
+            dict: מילון עם תוצאות החיפוש
+        """
+        self.console.print(f"[bold cyan]מחפש פגיעויות עבור {service_name} {version}...[/bold cyan]")
+        
+        results = {
+            "service": service_name,
+            "version": version,
+            "vulnerabilities": [],
+            "searchsploit_command": "",
+            "raw_output": ""
+        }
+        
+        # נקה את הגרסה ושם השירות לחיפוש מיטבי
+        clean_version = re.sub(r'[^0-9.]', '', version)  # שמור רק מספרים ונקודות
+        search_terms = []
+        
+        # יצירת מספר וריאציות לחיפוש
+        if clean_version:
+            # חיפוש לפי גרסה מדויקת
+            search_terms.append(f"{service_name} {clean_version}")
+            
+            # חיפוש לפי גרסה ראשית בלבד
+            major_version = clean_version.split('.')[0] if '.' in clean_version else clean_version
+            search_terms.append(f"{service_name} {major_version}")
+            
+            # חיפוש לפי גרסה ראשית ומשנית
+            if '.' in clean_version:
+                parts = clean_version.split('.')
+                if len(parts) >= 2:
+                    major_minor = f"{parts[0]}.{parts[1]}"
+                    search_terms.append(f"{service_name} {major_minor}")
+        
+        # הוסף חיפוש לפי שם השירות בלבד
+        search_terms.append(service_name)
+        
+        # הרץ searchsploit עבור כל אחד מהחיפושים
+        for search_term in search_terms:
+            # בנה את פקודת searchsploit
+            command = ["searchsploit", "--color", search_term]
+            
+            try:
+                result = run_tool(command, timeout=30)
+                output = result["stdout"]
+                
+                if result["returncode"] == 0 and "Exploits: No Results" not in output:
+                    results["searchsploit_command"] = " ".join(command)
+                    results["raw_output"] = output
+                    
+                    # פלט את התוצאות המלאות לקובץ זמני
+                    output_file = os.path.join(self.config.output_dir, f"searchsploit_{service_name}_{clean_version}.txt")
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        f.write(output)
+                    
+                    # פרסור התוצאות
+                    for line in output.splitlines():
+                        # דלג על שורות כותרת או ריקות
+                        if not line.strip() or "------" in line or "Exploit Title" in line:
+                            continue
+                        
+                        # ניסיון לחלץ פרטי הפגיעות
+                        try:
+                            # נחלק לפי רווחים מרובים
+                            parts = re.split(r'\s{2,}', line.strip())
+                            if len(parts) >= 2:
+                                vuln = {
+                                    "title": parts[0].strip(),
+                                    "path": parts[-1].strip() if len(parts) > 2 else "",
+                                    "raw": line.strip()
+                                }
+                                
+                                # בדוק אם מדובר ב-exploit חדש שלא נמצא כבר
+                                if not any(v["title"] == vuln["title"] for v in results["vulnerabilities"]):
+                                    results["vulnerabilities"].append(vuln)
+                        except Exception as e:
+                            self.logger.debug(f"שגיאה בפרסור שורת searchsploit: {str(e)}")
+                    
+                    # אם מצאנו תוצאות, הפסק את החיפוש
+                    if results["vulnerabilities"]:
+                        break
+            
+            except Exception as e:
+                self.logger.error(f"שגיאה בהרצת searchsploit: {str(e)}")
+        
+        # הצג סיכום התוצאות
+        if results["vulnerabilities"]:
+            self.console.print(f"[green]נמצאו {len(results['vulnerabilities'])} פגיעויות אפשריות עבור {service_name} {version}![/green]")
+        else:
+            self.console.print(f"[yellow]לא נמצאו פגיעויות ידועות עבור {service_name} {version}[/yellow]")
+        
+        return results
+
+    def prepare_exploit(self, exploit_path, target):
+        """
+        הכנת exploit להרצה
+        
+        Args:
+            exploit_path (str): נתיב ה-exploit ב-searchsploit
+            target (str): כתובת IP או שם מארח של המטרה
+            
+        Returns:
+            dict: פרטי ה-exploit שהוכן
+        """
+        result = {
+            "success": False,
+            "exploit_path": exploit_path,
+            "local_path": None,
+            "exploit_type": None,
+            "command": None,
+            "error": None
+        }
+        
+        self.console.print(f"[bold cyan]מכין את ה-exploit: {exploit_path}[/bold cyan]")
+        
+        try:
+            # העתק את ה-exploit למערכת המקומית
+            command = ["searchsploit", "-m", exploit_path]
+            copy_result = run_tool(command, timeout=30)
+            
+            if copy_result["returncode"] != 0:
+                result["error"] = f"שגיאה בהעתקת ה-exploit: {copy_result['stderr']}"
+                return result
+            
+            # מצא את המיקום המקומי של הקובץ שהועתק
+            output = copy_result["stdout"]
+            local_path_match = re.search(r"Copied to: (.+)", output)
+            
+            if not local_path_match:
+                result["error"] = "לא ניתן למצוא את נתיב ה-exploit המקומי"
+                return result
+            
+            local_path = local_path_match.group(1).strip()
+            result["local_path"] = local_path
+            
+            # זהה את סוג ה-exploit לפי סיומת הקובץ
+            if local_path.endswith(".py"):
+                result["exploit_type"] = "python"
+                result["command"] = f"python {local_path} {target}"
+            elif local_path.endswith(".rb"):
+                result["exploit_type"] = "ruby"
+                result["command"] = f"ruby {local_path} {target}"
+            elif local_path.endswith(".c"):
+                result["exploit_type"] = "c"
+                # הכנת קובץ C להרצה דורשת קומפילציה
+                compile_command = f"gcc {local_path} -o {local_path.replace('.c', '')}"
+                run_command = f"{local_path.replace('.c', '')} {target}"
+                result["command"] = f"{compile_command} && {run_command}"
+            elif local_path.endswith(".sh"):
+                result["exploit_type"] = "shell"
+                result["command"] = f"bash {local_path} {target}"
+            elif local_path.endswith(".php"):
+                result["exploit_type"] = "php"
+                result["command"] = f"php {local_path} {target}"
+            else:
+                result["exploit_type"] = "unknown"
+                result["command"] = f"cat {local_path}"  # הצג את תוכן הקובץ אם לא ניתן לזהות את הסוג
+            
+            result["success"] = True
+            self.console.print(f"[green]ה-exploit הועתק בהצלחה ל: {local_path}[/green]")
+            
+        except Exception as e:
+            result["error"] = f"שגיאה בהכנת ה-exploit: {str(e)}"
+            self.logger.error(f"שגיאה בהכנת ה-exploit {exploit_path}: {str(e)}")
+        
+        return result
+
+    def interactive_exploit_menu(self, service_type, service_name, version, target=None):
+        """
+        תפריט אינטראקטיבי לחיפוש ובחירת exploits
+        
+        Args:
+            service_type (str): סוג השירות (ftp, http, וכו')
+            service_name (str): שם השירות (vsftpd, apache, וכו')
+            version (str): גרסת השירות
+            target (str, optional): כתובת IP או שם המארח
+            
+        Returns:
+            bool: האם התהליך הושלם בהצלחה
+        """
+        if target is None:
+            target = self.target
+
+        self.console.print(f"[bold cyan]תפריט ניצול פגיעויות עבור {service_name} {version}[/bold cyan]")
+        
+        # חפש פגיעויות ב-searchsploit
+        search_results = self.find_vulnerabilities_with_searchsploit(service_name, version)
+        vulnerabilities = search_results.get("vulnerabilities", [])
+        
+        if not vulnerabilities:
+            self.console.print("[yellow]לא נמצאו פגיעויות ידועות. נסה חיפוש ידני או שנה את מונחי החיפוש.[/yellow]")
+            
+            # הצע למשתמש לבצע חיפוש מותאם אישית
+            self.console.print("[bold]האם תרצה לבצע חיפוש מותאם אישית ב-searchsploit?[/bold] (כן/לא)")
+            custom_search = input("> ").strip().lower()
+            
+            if custom_search in ["כן", "yes", "y"]:
+                self.console.print("[bold]הזן מונחי חיפוש (למשל: vsftpd 2.3.4):[/bold]")
+                search_term = input("> ").strip()
+                
+                if search_term:
+                    # הרץ את החיפוש המותאם אישית
+                    command = ["searchsploit", "--color", search_term]
+                    try:
+                        result = run_tool(command, timeout=30)
+                        self.console.print(result["stdout"])
+                        
+                        # בקש מהמשתמש להזין את נתיב ה-exploit המדויק אם מעוניין
+                        self.console.print("[bold]הזן את נתיב ה-exploit (למשל: 49757.py) או הקש Enter לביטול:[/bold]")
+                        exploit_path = input("> ").strip()
+                        
+                        if exploit_path:
+                            # הכן את ה-exploit
+                            exploit_info = self.prepare_exploit(exploit_path, target)
+                            
+                            if exploit_info["success"]:
+                                # הצג הוראות הרצה
+                                self.display_exploit_instructions(exploit_info, target)
+                                return True
+                    except Exception as e:
+                        self.logger.error(f"שגיאה בהרצת חיפוש מותאם אישית: {str(e)}")
+            
+            return False
+        
+        # הצג את הפגיעויות שנמצאו
+        self.console.print("\n[bold green]פגיעויות אפשריות:[/bold green]")
+        for i, vuln in enumerate(vulnerabilities, 1):
+            self.console.print(f"  {i}. [cyan]{vuln['title']}[/cyan]")
+            if vuln['path']:
+                self.console.print(f"     Path: {vuln['path']}")
+        
+        # בקש מהמשתמש לבחור exploit
+        self.console.print("\n[bold]בחר מספר exploit להכנה או הקש Enter לביטול:[/bold]")
+        selection = input("> ").strip()
+        
+        if not selection:
+            self.console.print("[yellow]פעולה בוטלה.[/yellow]")
+            return False
+        
+        try:
+            selection_idx = int(selection)
+            if 1 <= selection_idx <= len(vulnerabilities):
+                selected_vuln = vulnerabilities[selection_idx - 1]
+                
+                # נתיב ה-exploit עשוי להיות מסוגים שונים
+                exploit_path = selected_vuln["path"]
+                
+                # הכן את ה-exploit
+                exploit_info = self.prepare_exploit(exploit_path, target)
+                
+                if exploit_info["success"]:
+                    # הצג הוראות הרצה
+                    self.display_exploit_instructions(exploit_info, target)
+                    return True
+                else:
+                    self.console.print(f"[red]שגיאה בהכנת ה-exploit: {exploit_info['error']}[/red]")
+            else:
+                self.console.print("[red]בחירה לא חוקית.[/red]")
+        except ValueError:
+            self.console.print("[red]בחירה לא חוקית. אנא הזן מספר.[/red]")
+        
+        return False
+    
+    def display_exploit_instructions(self, exploit_info, target):
+        """
+        הצגת הוראות להרצת ה-exploit
+        
+        Args:
+            exploit_info (dict): פרטי ה-exploit שהוכן
+            target (str): כתובת IP או שם מארח של המטרה
+        """
+        self.console.print("\n[bold green]ה-exploit הוכן בהצלחה![/bold green]")
+        self.console.print(f"[cyan]סוג ה-exploit: {exploit_info['exploit_type']}[/cyan]")
+        self.console.print(f"[cyan]מיקום מקומי: {exploit_info['local_path']}[/cyan]")
+        
+        self.console.print("\n[bold yellow]הוראות הרצה:[/bold yellow]")
+        
+        if exploit_info["exploit_type"] == "unknown":
+            self.console.print("[yellow]סוג ה-exploit לא זוהה. להלן תוכן הקובץ:[/yellow]")
+            try:
+                with open(exploit_info["local_path"], "r", errors="ignore") as f:
+                    content = f.read(1000)  # הצג רק 1000 תווים ראשונים
+                self.console.print(f"```\n{content}\n...\n```")
+                self.console.print("[yellow]עליך לבדוק את הקובץ ולקבוע כיצד להשתמש בו.[/yellow]")
+            except Exception as e:
+                self.console.print(f"[red]שגיאה בקריאת תוכן הקובץ: {str(e)}[/red]")
+        else:
+            self.console.print(f"[green]להרצת ה-exploit, הפעל את הפקודה הבאה:[/green]")
+            self.console.print(f"[bold white]{exploit_info['command']}[/bold white]")
+            
+            if exploit_info["exploit_type"] == "c":
+                self.console.print("[yellow]שים לב: קובץ C דורש קומפילציה לפני ההרצה.[/yellow]")
+            
+            # שאל את המשתמש אם להריץ את ה-exploit
+            self.console.print("\n[bold]האם תרצה להריץ את ה-exploit עכשיו?[/bold] (כן/לא)")
+            run_exploit = input("> ").strip().lower()
+            
+            if run_exploit in ["כן", "yes", "y"]:
+                self.console.print("\n[bold cyan]מריץ את ה-exploit...[/bold cyan]")
+                try:
+                    # הרץ את הפקודה
+                    import subprocess
+                    if exploit_info["exploit_type"] == "c":
+                        # לקובצי C, נריץ קודם את הקומפילציה ואחריה את ההרצה
+                        compile_cmd = exploit_info["command"].split("&&")[0].strip()
+                        run_cmd = exploit_info["command"].split("&&")[1].strip()
+                        
+                        self.console.print(f"[cyan]קומפילציה: {compile_cmd}[/cyan]")
+                        compile_process = subprocess.Popen(compile_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        stdout, stderr = compile_process.communicate()
+                        
+                        if compile_process.returncode == 0:
+                            self.console.print("[green]קומפילציה הסתיימה בהצלחה.[/green]")
+                            self.console.print(f"[cyan]הרצה: {run_cmd}[/cyan]")
+                            run_process = subprocess.Popen(run_cmd, shell=True)
+                            run_process.wait()
+                        else:
+                            self.console.print(f"[red]שגיאת קומפילציה: {stderr.decode('utf-8', errors='ignore')}[/red]")
+                    else:
+                        # לכל סוגי הקבצים האחרים, נריץ את הפקודה ישירות
+                        process = subprocess.Popen(exploit_info["command"], shell=True)
+                        process.wait()
+                except Exception as e:
+                    self.console.print(f"[red]שגיאה בהרצת ה-exploit: {str(e)}[/red]")
+        
+        self.console.print("\n[bold yellow]זכור:[/bold yellow]")
+        self.console.print("[yellow]1. שימוש ב-exploits עלול לדרוש התאמות לתנאי הסביבה הספציפיים.[/yellow]")
+        self.console.print("[yellow]2. ייתכן שיידרשו פרמטרים נוספים לחלק מה-exploits.[/yellow]")
+        self.console.print("[yellow]3. בדוק תמיד את קוד ה-exploit לפני הרצה כדי להבין את פעולתו.[/yellow]")
+    
+    def find_vulnerabilities_with_searchsploit(self, service_name, version):
+        """
+        חיפוש פגיעויות אפשריות באמצעות searchsploit
+        
+        Args:
+            service_name (str): שם השירות (למשל vsftpd, apache)
+            version (str): גרסת השירות
+            
+        Returns:
+            dict: מילון עם תוצאות החיפוש
+        """
+        self.console.print(f"[bold cyan]מחפש פגיעויות עבור {service_name} {version}...[/bold cyan]")
+        
+        results = {
+            "service": service_name,
+            "version": version,
+            "vulnerabilities": [],
+            "searchsploit_command": "",
+            "raw_output": ""
+        }
+        
+        # נקה את הגרסה ושם השירות לחיפוש מיטבי
+        clean_version = re.sub(r'[^0-9.]', '', version)  # שמור רק מספרים ונקודות
+        search_terms = []
+        
+        # יצירת מספר וריאציות לחיפוש
+        if clean_version:
+            # חיפוש לפי גרסה מדויקת
+            search_terms.append(f"{service_name} {clean_version}")
+            
+            # חיפוש לפי גרסה ראשית בלבד
+            major_version = clean_version.split('.')[0] if '.' in clean_version else clean_version
+            search_terms.append(f"{service_name} {major_version}")
+            
+            # חיפוש לפי גרסה ראשית ומשנית
+            if '.' in clean_version:
+                parts = clean_version.split('.')
+                if len(parts) >= 2:
+                    major_minor = f"{parts[0]}.{parts[1]}"
+                    search_terms.append(f"{service_name} {major_minor}")
+        
+        # הוסף חיפוש לפי שם השירות בלבד
+        search_terms.append(service_name)
+        
+        # הרץ searchsploit עבור כל אחד מהחיפושים
+        for search_term in search_terms:
+            # בנה את פקודת searchsploit
+            command = ["searchsploit", "--color", search_term]
+            
+            try:
+                result = run_tool(command, timeout=30)
+                output = result["stdout"]
+                
+                if result["returncode"] == 0 and "Exploits: No Results" not in output:
+                    results["searchsploit_command"] = " ".join(command)
+                    results["raw_output"] = output
+                    
+                    # פלט את התוצאות המלאות לקובץ זמני
+                    output_file = os.path.join(self.config.output_dir, f"searchsploit_{service_name}_{clean_version}.txt")
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        f.write(output)
+                    
+                    # פרסור התוצאות
+                    for line in output.splitlines():
+                        # דלג על שורות כותרת או ריקות
+                        if not line.strip() or "------" in line or "Exploit Title" in line:
+                            continue
+                        
+                        # ניסיון לחלץ פרטי הפגיעות
+                        try:
+                            # נחלק לפי רווחים מרובים
+                            parts = re.split(r'\s{2,}', line.strip())
+                            if len(parts) >= 2:
+                                vuln = {
+                                    "title": parts[0].strip(),
+                                    "path": parts[-1].strip() if len(parts) > 2 else "",
+                                    "raw": line.strip()
+                                }
+                                
+                                # בדוק אם מדובר ב-exploit חדש שלא נמצא כבר
+                                if not any(v["title"] == vuln["title"] for v in results["vulnerabilities"]):
+                                    results["vulnerabilities"].append(vuln)
+                        except Exception as e:
+                            self.logger.debug(f"שגיאה בפרסור שורת searchsploit: {str(e)}")
+                    
+                    # אם מצאנו תוצאות, הפסק את החיפוש
+                    if results["vulnerabilities"]:
+                        break
+            
+            except Exception as e:
+                self.logger.error(f"שגיאה בהרצת searchsploit: {str(e)}")
+        
+        # הצג סיכום התוצאות
+        if results["vulnerabilities"]:
+            self.console.print(f"[green]נמצאו {len(results['vulnerabilities'])} פגיעויות אפשריות עבור {service_name} {version}![/green]")
+        else:
+            self.console.print(f"[yellow]לא נמצאו פגיעויות ידועות עבור {service_name} {version}[/yellow]")
+        
+        return results
+
+    def prepare_exploit(self, exploit_path, target):
+        """
+        הכנת exploit להרצה
+        
+        Args:
+            exploit_path (str): נתיב ה-exploit ב-searchsploit
+            target (str): כתובת IP או שם מארח של המטרה
+            
+        Returns:
+            dict: פרטי ה-exploit שהוכן
+        """
+        result = {
+            "success": False,
+            "exploit_path": exploit_path,
+            "local_path": None,
+            "exploit_type": None,
+            "command": None,
+            "error": None
+        }
+        
+        self.console.print(f"[bold cyan]מכין את ה-exploit: {exploit_path}[/bold cyan]")
+        
+        try:
+            # העתק את ה-exploit למערכת המקומית
+            command = ["searchsploit", "-m", exploit_path]
+            copy_result = run_tool(command, timeout=30)
+            
+            if copy_result["returncode"] != 0:
+                result["error"] = f"שגיאה בהעתקת ה-exploit: {copy_result['stderr']}"
+                return result
+            
+            # מצא את המיקום המקומי של הקובץ שהועתק
+            output = copy_result["stdout"]
+            local_path_match = re.search(r"Copied to: (.+)", output)
+            
+            if not local_path_match:
+                result["error"] = "לא ניתן למצוא את נתיב ה-exploit המקומי"
+                return result
+            
+            local_path = local_path_match.group(1).strip()
+            result["local_path"] = local_path
+            
+            # זהה את סוג ה-exploit לפי סיומת הקובץ
+            if local_path.endswith(".py"):
+                result["exploit_type"] = "python"
+                result["command"] = f"python {local_path} {target}"
+            elif local_path.endswith(".rb"):
+                result["exploit_type"] = "ruby"
+                result["command"] = f"ruby {local_path} {target}"
+            elif local_path.endswith(".c"):
+                result["exploit_type"] = "c"
+                # הכנת קובץ C להרצה דורשת קומפילציה
+                compile_command = f"gcc {local_path} -o {local_path.replace('.c', '')}"
+                run_command = f"{local_path.replace('.c', '')} {target}"
+                result["command"] = f"{compile_command} && {run_command}"
+            elif local_path.endswith(".sh"):
+                result["exploit_type"] = "shell"
+                result["command"] = f"bash {local_path} {target}"
+            elif local_path.endswith(".php"):
+                result["exploit_type"] = "php"
+                result["command"] = f"php {local_path} {target}"
+            else:
+                result["exploit_type"] = "unknown"
+                result["command"] = f"cat {local_path}"  # הצג את תוכן הקובץ אם לא ניתן לזהות את הסוג
+            
+            result["success"] = True
+            self.console.print(f"[green]ה-exploit הועתק בהצלחה ל: {local_path}[/green]")
+            
+        except Exception as e:
+            result["error"] = f"שגיאה בהכנת ה-exploit: {str(e)}"
+            self.logger.error(f"שגיאה בהכנת ה-exploit {exploit_path}: {str(e)}")
+        
+        return result
+
+    def interactive_exploit_menu(self, service_type, service_name, version, target=None):
+        """
+        תפריט אינטראקטיבי לחיפוש ובחירת exploits
+        
+        Args:
+            service_type (str): סוג השירות (ftp, http, וכו')
+            service_name (str): שם השירות (vsftpd, apache, וכו')
+            version (str): גרסת השירות
+            target (str, optional): כתובת IP או שם המארח
+            
+        Returns:
+            bool: האם התהליך הושלם בהצלחה
+        """
+        if target is None:
+            target = self.target
+
+        self.console.print(f"[bold cyan]תפריט ניצול פגיעויות עבור {service_name} {version}[/bold cyan]")
+        
+        # חפש פגיעויות ב-searchsploit
+        search_results = self.find_vulnerabilities_with_searchsploit(service_name, version)
+        vulnerabilities = search_results.get("vulnerabilities", [])
+        
+        if not vulnerabilities:
+            self.console.print("[yellow]לא נמצאו פגיעויות ידועות. נסה חיפוש ידני או שנה את מונחי החיפוש.[/yellow]")
+            
+            # הצע למשתמש לבצע חיפוש מותאם אישית
+            self.console.print("[bold]האם תרצה לבצע חיפוש מותאם אישית ב-searchsploit?[/bold] (כן/לא)")
+            custom_search = input("> ").strip().lower()
+            
+            if custom_search in ["כן", "yes", "y"]:
+                self.console.print("[bold]הזן מונחי חיפוש (למשל: vsftpd 2.3.4):[/bold]")
+                search_term = input("> ").strip()
+                
+                if search_term:
+                    # הרץ את החיפוש המותאם אישית
+                    command = ["searchsploit", "--color", search_term]
+                    try:
+                        result = run_tool(command, timeout=30)
+                        self.console.print(result["stdout"])
+                        
+                        # בקש מהמשתמש להזין את נתיב ה-exploit המדויק אם מעוניין
+                        self.console.print("[bold]הזן את נתיב ה-exploit (למשל: 49757.py) או הקש Enter לביטול:[/bold]")
+                        exploit_path = input("> ").strip()
+                        
+                        if exploit_path:
+                            # הכן את ה-exploit
+                            exploit_info = self.prepare_exploit(exploit_path, target)
+                            
+                            if exploit_info["success"]:
+                                # הצג הוראות הרצה
+                                self.display_exploit_instructions(exploit_info, target)
+                                return True
+                    except Exception as e:
+                        self.logger.error(f"שגיאה בהרצת חיפוש מותאם אישית: {str(e)}")
+            
+            return False
+        
+        # הצג את הפגיעויות שנמצאו
+        self.console.print("\n[bold green]פגיעויות אפשריות:[/bold green]")
+        for i, vuln in enumerate(vulnerabilities, 1):
+            self.console.print(f"  {i}. [cyan]{vuln['title']}[/cyan]")
+            if vuln['path']:
+                self.console.print(f"     Path: {vuln['path']}")
+        
+        # בקש מהמשתמש לבחור exploit
+        self.console.print("\n[bold]בחר מספר exploit להכנה או הקש Enter לביטול:[/bold]")
+        selection = input("> ").strip()
+        
+        if not selection:
+            self.console.print("[yellow]פעולה בוטלה.[/yellow]")
+            return False
+        
+        try:
+            selection_idx = int(selection)
+            if 1 <= selection_idx <= len(vulnerabilities):
+                selected_vuln = vulnerabilities[selection_idx - 1]
+                
+                # נתיב ה-exploit עשוי להיות מסוגים שונים
+                exploit_path = selected_vuln["path"]
+                
+                # הכן את ה-exploit
+                exploit_info = self.prepare_exploit(exploit_path, target)
+                
+                if exploit_info["success"]:
+                    # הצג הוראות הרצה
+                    self.display_exploit_instructions(exploit_info, target)
+                    return True
+                else:
+                    self.console.print(f"[red]שגיאה בהכנת ה-exploit: {exploit_info['error']}[/red]")
+            else:
+                self.console.print("[red]בחירה לא חוקית.[/red]")
+        except ValueError:
+            self.console.print("[red]בחירה לא חוקית. אנא הזן מספר.[/red]")
+        
+        return False
+    
+    def display_exploit_instructions(self, exploit_info, target):
+        """
+        הצגת הוראות להרצת ה-exploit
+        
+        Args:
+            exploit_info (dict): פרטי ה-exploit שהוכן
+            target (str): כתובת IP או שם מארח של המטרה
+        """
+        self.console.print("\n[bold green]ה-exploit הוכן בהצלחה![/bold green]")
+        self.console.print(f"[cyan]סוג ה-exploit: {exploit_info['exploit_type']}[/cyan]")
+        self.console.print(f"[cyan]מיקום מקומי: {exploit_info['local_path']}[/cyan]")
+        
+        self.console.print("\n[bold yellow]הוראות הרצה:[/bold yellow]")
+        
+        if exploit_info["exploit_type"] == "unknown":
+            self.console.print("[yellow]סוג ה-exploit לא זוהה. להלן תוכן הקובץ:[/yellow]")
+            try:
+                with open(exploit_info["local_path"], "r", errors="ignore") as f:
+                    content = f.read(1000)  # הצג רק 1000 תווים ראשונים
+                self.console.print(f"```\n{content}\n...\n```")
+                self.console.print("[yellow]עליך לבדוק את הקובץ ולקבוע כיצד להשתמש בו.[/yellow]")
+            except Exception as e:
+                self.console.print(f"[red]שגיאה בקריאת תוכן הקובץ: {str(e)}[/red]")
+        else:
+            self.console.print(f"[green]להרצת ה-exploit, הפעל את הפקודה הבאה:[/green]")
+            self.console.print(f"[bold white]{exploit_info['command']}[/bold white]")
+            
+            if exploit_info["exploit_type"] == "c":
+                self.console.print("[yellow]שים לב: קובץ C דורש קומפילציה לפני ההרצה.[/yellow]")
+            
+            # שאל את המשתמש אם להריץ את ה-exploit
+            self.console.print("\n[bold]האם תרצה להריץ את ה-exploit עכשיו?[/bold] (כן/לא)")
+            run_exploit = input("> ").strip().lower()
+            
+            if run_exploit in ["כן", "yes", "y"]:
+                self.console.print("\n[bold cyan]מריץ את ה-exploit...[/bold cyan]")
+                try:
+                    # הרץ את הפקודה
+                    import subprocess
+                    if exploit_info["exploit_type"] == "c":
+                        # לקובצי C, נריץ קודם את הקומפילציה ואחריה את ההרצה
+                        compile_cmd = exploit_info["command"].split("&&")[0].strip()
+                        run_cmd = exploit_info["command"].split("&&")[1].strip()
+                        
+                        self.console.print(f"[cyan]קומפילציה: {compile_cmd}[/cyan]")
+                        compile_process = subprocess.Popen(compile_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        stdout, stderr = compile_process.communicate()
+                        
+                        if compile_process.returncode == 0:
+                            self.console.print("[green]קומפילציה הסתיימה בהצלחה.[/green]")
+                            self.console.print(f"[cyan]הרצה: {run_cmd}[/cyan]")
+                            run_process = subprocess.Popen(run_cmd, shell=True)
+                            run_process.wait()
+                        else:
+                            self.console.print(f"[red]שגיאת קומפילציה: {stderr.decode('utf-8', errors='ignore')}[/red]")
+                    else:
+                        # לכל סוגי הקבצים האחרים, נריץ את הפקודה ישירות
+                        process = subprocess.Popen(exploit_info["command"], shell=True)
+                        process.wait()
+                except Exception as e:
+                    self.console.print(f"[red]שגיאה בהרצת ה-exploit: {str(e)}[/red]")
+        
+        self.console.print("\n[bold yellow]זכור:[/bold yellow]")
+        self.console.print("[yellow]1. שימוש ב-exploits עלול לדרוש התאמות לתנאי הסביבה הספציפיים.[/yellow]")
+        self.console.print("[yellow]2. ייתכן שיידרשו פרמטרים נוספים לחלק מה-exploits.[/yellow]")
+        self.console.print("[yellow]3. בדוק תמיד את קוד ה-exploit לפני הרצה כדי להבין את פעולתו.[/yellow]")
+    
+    def find_vulnerabilities_with_searchsploit(self, service_name, version):
+        """
+        חיפוש פגיעויות אפשריות באמצעות searchsploit
+        
+        Args:
+            service_name (str): שם השירות (למשל vsftpd, apache)
+            version (str): גרסת השירות
+            
+        Returns:
+            dict: מילון עם תוצאות החיפוש
+        """
+        self.console.print(f"[bold cyan]מחפש פגיעויות עבור {service_name} {version}...[/bold cyan]")
+        
+        results = {
+            "service": service_name,
+            "version": version,
+            "vulnerabilities": [],
+            "searchsploit_command": "",
+            "raw_output": ""
+        }
+        
+        # נקה את הגרסה ושם השירות לחיפוש מיטבי
+        clean_version = re.sub(r'[^0-9.]', '', version)  # שמור רק מספרים ונקודות
+        search_terms = []
+        
+        # יצירת מספר וריאציות לחיפוש
+        if clean_version:
+            # חיפוש לפי גרסה מדויקת
+            search_terms.append(f"{service_name} {clean_version}")
+            
+            # חיפוש לפי גרסה ראשית בלבד
+            major_version = clean_version.split('.')[0] if '.' in clean_version else clean_version
+            search_terms.append(f"{service_name} {major_version}")
+            
+            # חיפוש לפי גרסה ראשית ומשנית
+            if '.' in clean_version:
+                parts = clean_version.split('.')
+                if len(parts) >= 2:
+                    major_minor = f"{parts[0]}.{parts[1]}"
+                    search_terms.append(f"{service_name} {major_minor}")
+        
+        # הוסף חיפוש לפי שם השירות בלבד
+        search_terms.append(service_name)
+        
+        # הרץ searchsploit עבור כל אחד מהחיפושים
+        for search_term in search_terms:
+            # בנה את פקודת searchsploit
+            command = ["searchsploit", "--color", search_term]
+            
+            try:
+                result = run_tool(command, timeout=30)
+                output = result["stdout"]
+                
+                if result["returncode"] == 0 and "Exploits: No Results" not in output:
+                    results["searchsploit_command"] = " ".join(command)
+                    results["raw_output"] = output
+                    
+                    # פלט את התוצאות המלאות לקובץ זמני
+                    output_file = os.path.join(self.config.output_dir, f"searchsploit_{service_name}_{clean_version}.txt")
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        f.write(output)
+                    
+                    # פרסור התוצאות
+                    for line in output.splitlines():
+                        # דלג על שורות כותרת או ריקות
+                        if not line.strip() or "------" in line or "Exploit Title" in line:
+                            continue
+                        
+                        # ניסיון לחלץ פרטי הפגיעות
+                        try:
+                            # נחלק לפי רווחים מרובים
+                            parts = re.split(r'\s{2,}', line.strip())
+                            if len(parts) >= 2:
+                                vuln = {
+                                    "title": parts[0].strip(),
+                                    "path": parts[-1].strip() if len(parts) > 2 else "",
+                                    "raw": line.strip()
+                                }
+                                
+                                # בדוק אם מדובר ב-exploit חדש שלא נמצא כבר
+                                if not any(v["title"] == vuln["title"] for v in results["vulnerabilities"]):
+                                    results["vulnerabilities"].append(vuln)
+                        except Exception as e:
+                            self.logger.debug(f"שגיאה בפרסור שורת searchsploit: {str(e)}")
+                    
+                    # אם מצאנו תוצאות, הפסק את החיפוש
+                    if results["vulnerabilities"]:
+                        break
+            
+            except Exception as e:
+                self.logger.error(f"שגיאה בהרצת searchsploit: {str(e)}")
+        
+        # הצג סיכום התוצאות
+        if results["vulnerabilities"]:
+            self.console.print(f"[green]נמצאו {len(results['vulnerabilities'])} פגיעויות אפשריות עבור {service_name} {version}![/green]")
+        else:
+            self.console.print(f"[yellow]לא נמצאו פגיעויות ידועות עבור {service_name} {version}[/yellow]")
+        
+        return results
+
+    def prepare_exploit(self, exploit_path, target):
+        """
+        הכנת exploit להרצה
+        
+        Args:
+            exploit_path (str): נתיב ה-exploit ב-searchsploit
+            target (str): כתובת IP או שם מארח של המטרה
+            
+        Returns:
+            dict: פרטי ה-exploit שהוכן
+        """
+        result = {
+            "success": False,
+            "exploit_path": exploit_path,
+            "local_path": None,
+            "exploit_type": None,
+            "command": None,
+            "error": None
+        }
+        
+        self.console.print(f"[bold cyan]מכין את ה-exploit: {exploit_path}[/bold cyan]")
+        
+        try:
+            # העתק את ה-exploit למערכת המקומית
+            command = ["searchsploit", "-m", exploit_path]
+            copy_result = run_tool(command, timeout=30)
+            
+            if copy_result["returncode"] != 0:
+                result["error"] = f"שגיאה בהעתקת ה-exploit: {copy_result['stderr']}"
+                return result
+            
+            # מצא את המיקום המקומי של הקובץ שהועתק
+            output = copy_result["stdout"]
+            local_path_match = re.search(r"Copied to: (.+)", output)
+            
+            if not local_path_match:
+                result["error"] = "לא ניתן למצוא את נתיב ה-exploit המקומי"
+                return result
+            
+            local_path = local_path_match.group(1).strip()
+            result["local_path"] = local_path
+            
+            # זהה את סוג ה-exploit לפי סיומת הקובץ
+            if local_path.endswith(".py"):
+                result["exploit_type"] = "python"
+                result["command"] = f"python {local_path} {target}"
+            elif local_path.endswith(".rb"):
+                result["exploit_type"] = "ruby"
+                result["command"] = f"ruby {local_path} {target}"
+            elif local_path.endswith(".c"):
+                result["exploit_type"] = "c"
+                # הכנת קובץ C להרצה דורשת קומפילציה
+                compile_command = f"gcc {local_path} -o {local_path.replace('.c', '')}"
+                run_command = f"{local_path.replace('.c', '')} {target}"
+                result["command"] = f"{compile_command} && {run_command}"
+            elif local_path.endswith(".sh"):
+                result["exploit_type"] = "shell"
+                result["command"] = f"bash {local_path} {target}"
+            elif local_path.endswith(".php"):
+                result["exploit_type"] = "php"
+                result["command"] = f"php {local_path} {target}"
+            else:
+                result["exploit_type"] = "unknown"
+                result["command"] = f"cat {local_path}"  # הצג את תוכן הקובץ אם לא ניתן לזהות את הסוג
+            
+            result["success"] = True
+            self.console.print(f"[green]ה-exploit הועתק בהצלחה ל: {local_path}[/green]")
+            
+        except Exception as e:
+            result["error"] = f"שגיאה בהכנת ה-exploit: {str(e)}"
+            self.logger.error(f"שגיאה בהכנת ה-exploit {exploit_path}: {str(e)}")
+        
+        return result
+
+    def interactive_exploit_menu(self, service_type, service_name, version, target=None):
+        """
+        תפריט אינטראקטיבי לחיפוש ובחירת exploits
+        
+        Args:
+            service_type (str): סוג השירות (ftp, http, וכו')
+            service_name (str): שם השירות (vsftpd, apache, וכו')
+            version (str): גרסת השירות
+            target (str, optional): כתובת IP או שם המארח
+            
+        Returns:
+            bool: האם התהליך הושלם בהצלחה
+        """
+        if target is None:
+            target = self.target
+
+        self.console.print(f"[bold cyan]תפריט ניצול פגיעויות עבור {service_name} {version}[/bold cyan]")
+        
+        # חפש פגיעויות ב-searchsploit
+        search_results = self.find_vulnerabilities_with_searchsploit(service_name, version)
+        vulnerabilities = search_results.get("vulnerabilities", [])
+        
+        if not vulnerabilities:
+            self.console.print("[yellow]לא נמצאו פגיעויות ידועות. נסה חיפוש ידני או שנה את מונחי החיפוש.[/yellow]")
+            
+            # הצע למשתמש לבצע חיפוש מותאם אישית
+            self.console.print("[bold]האם תרצה לבצע חיפוש מותאם אישית ב-searchsploit?[/bold] (כן/לא)")
+            custom_search = input("> ").strip().lower()
+            
+            if custom_search in ["כן", "yes", "y"]:
+                self.console.print("[bold]הזן מונחי חיפוש (למשל: vsftpd 2.3.4):[/bold]")
+                search_term = input("> ").strip()
+                
+                if search_term:
+                    # הרץ את החיפוש המותאם אישית
+                    command = ["searchsploit", "--color", search_term]
+                    try:
+                        result = run_tool(command, timeout=30)
+                        self.console.print(result["stdout"])
+                        
+                        # בקש מהמשתמש להזין את נתיב ה-exploit המדויק אם מעוניין
+                        self.console.print("[bold]הזן את נתיב ה-exploit (למשל: 49757.py) או הקש Enter לביטול:[/bold]")
+                        exploit_path = input("> ").strip()
+                        
+                        if exploit_path:
+                            # הכן את ה-exploit
+                            exploit_info = self.prepare_exploit(exploit_path, target)
+                            
+                            if exploit_info["success"]:
+                                # הצג הוראות הרצה
+                                self.display_exploit_instructions(exploit_info, target)
+                                return True
+                    except Exception as e:
+                        self.logger.error(f"שגיאה בהרצת חיפוש מותאם אישית: {str(e)}")
+            
+            return False
+        
+        # הצג את הפגיעויות שנמצאו
+        self.console.print("\n[bold green]פגיעויות אפשריות:[/bold green]")
+        for i, vuln in enumerate(vulnerabilities, 1):
+            self.console.print(f"  {i}. [cyan]{vuln['title']}[/cyan]")
+            if vuln['path']:
+                self.console.print(f"     Path: {vuln['path']}")
+        
+        # בקש מהמשתמש לבחור exploit
+        self.console.print("\n[bold]בחר מספר exploit להכנה או הקש Enter לביטול:[/bold]")
+        selection = input("> ").strip()
+        
+        if not selection:
+            self.console.print("[yellow]פעולה בוטלה.[/yellow]")
+            return False
+        
+        try:
+            selection_idx = int(selection)
+            if 1 <= selection_idx <= len(vulnerabilities):
+                selected_vuln = vulnerabilities[selection_idx - 1]
+                
+                # נתיב ה-exploit עשוי להיות מסוגים שונים
+                exploit_path = selected_vuln["path"]
+                
+                # הכן את ה-exploit
+                exploit_info = self.prepare_exploit(exploit_path, target)
+                
+                if exploit_info["success"]:
+                    # הצג הוראות הרצה
+                    self.display_exploit_instructions(exploit_info, target)
+                    return True
+                else:
+                    self.console.print(f"[red]שגיאה בהכנת ה-exploit: {exploit_info['error']}[/red]")
+            else:
+                self.console.print("[red]בחירה לא חוקית.[/red]")
+        except ValueError:
+            self.console.print("[red]בחירה לא חוקית. אנא הזן מספר.[/red]")
+        
+        return False
+    
+    def display_exploit_instructions(self, exploit_info, target):
+        """
+        הצגת הוראות להרצת ה-exploit
+        
+        Args:
+            exploit_info (dict): פרטי ה-exploit שהוכן
+            target (str): כתובת IP או שם מארח של המטרה
+        """
+        self.console.print("\n[bold green]ה-exploit הוכן בהצלחה![/bold green]")
+        self.console.print(f"[cyan]סוג ה-exploit: {exploit_info['exploit_type']}[/cyan]")
+        self.console.print(f"[cyan]מיקום מקומי: {exploit_info['local_path']}[/cyan]")
+        
+        self.console.print("\n[bold yellow]הוראות הרצה:[/bold yellow]")
+        
+        if exploit_info["exploit_type"] == "unknown":
+            self.console.print("[yellow]סוג ה-exploit לא זוהה. להלן תוכן הקובץ:[/yellow]")
+            try:
+                with open(exploit_info["local_path"], "r", errors="ignore") as f:
+                    content = f.read(1000)  # הצג רק 1000 תווים ראשונים
+                self.console.print(f"```\n{content}\n...\n```")
+                self.console.print("[yellow]עליך לבדוק את הקובץ ולקבוע כיצד להשתמש בו.[/yellow]")
+            except Exception as e:
+                self.console.print(f"[red]שגיאה בקריאת תוכן הקובץ: {str(e)}[/red]")
+        else:
+            self.console.print(f"[green]להרצת ה-exploit, הפעל את הפקודה הבאה:[/green]")
+            self.console.print(f"[bold white]{exploit_info['command']}[/bold white]")
+            
+            if exploit_info["exploit_type"] == "c":
+                self.console.print("[yellow]שים לב: קובץ C דורש קומפילציה לפני ההרצה.[/yellow]")
+            
+            # שאל את המשתמש אם להריץ את ה-exploit
+            self.console.print("\n[bold]האם תרצה להריץ את ה-exploit עכשיו?[/bold] (כן/לא)")
+            run_exploit = input("> ").strip().lower()
+            
+            if run_exploit in ["כן", "yes", "y"]:
+                self.console.print("\n[bold cyan]מריץ את ה-exploit...[/bold cyan]")
+                try:
+                    # הרץ את הפקודה
+                    import subprocess
+                    if exploit_info["exploit_type"] == "c":
+                        # לקובצי C, נריץ קודם את הקומפילציה ואחריה את ההרצה
+                        compile_cmd = exploit_info["command"].split("&&")[0].strip()
+                        run_cmd = exploit_info["command"].split("&&")[1].strip()
+                        
+                        self.console.print(f"[cyan]קומפילציה: {compile_cmd}[/cyan]")
+                        compile_process = subprocess.Popen(compile_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        stdout, stderr = compile_process.communicate()
+                        
+                        if compile_process.returncode == 0:
+                            self.console.print("[green]קומפילציה הסתיימה בהצלחה.[/green]")
+                            self.console.print(f"[cyan]הרצה: {run_cmd}[/cyan]")
+                            run_process = subprocess.Popen(run_cmd, shell=True)
+                            run_process.wait()
+                        else:
+                            self.console.print(f"[red]שגיאת קומפילציה: {stderr.decode('utf-8', errors='ignore')}[/red]")
+                    else:
+                        # לכל סוגי הקבצים האחרים, נריץ את הפקודה ישירות
+                        process = subprocess.Popen(exploit_info["command"], shell=True)
+                        process.wait()
+                except Exception as e:
+                    self.console.print(f"[red]שגיאה בהרצת ה-exploit: {str(e)}[/red]")
+        
+        self.console.print("\n[bold yellow]זכור:[/bold yellow]")
+        self.console.print("[yellow]1. שימוש ב-exploits עלול לדרוש התאמות לתנאי הסביבה הספציפיים.[/yellow]")
+        self.console.print("[yellow]2. ייתכן שיידרשו פרמטרים נוספים לחלק מה-exploits.[/yellow]")
+        self.console.print("[yellow]3. בדוק תמיד את קוד ה-exploit לפני הרצה כדי להבין את פעולתו.[/yellow]")
