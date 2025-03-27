@@ -1915,213 +1915,86 @@ class Enumeration:
 
     def find_vulnerabilities_with_searchsploit(self, service_name, version=None):
         """
-        Find vulnerabilities for a service using searchsploit
-
+        Search for vulnerabilities using searchsploit
+        
         Args:
-            service_name (str): Service name (e.g., apache)
-            version (str, optional): Service version
-
+            service_name: Service name to search for
+            version: Optional version number
+            
         Returns:
-            dict: Dictionary with found vulnerabilities
+            List of vulnerabilities found
         """
-        if not service_name:
-            return {"vulnerabilities": [], "raw_output": "No service name provided"}
-
-        self.console.print(f"[cyan]Searching for vulnerabilities for {service_name}{' ' + version if version else ''}...[/cyan]")
+        self.logger.info(f"Searching for vulnerabilities for {service_name} {version if version else ''}")
         
-        # Special case for vsftpd 2.3.4 (known backdoor)
+        # Special case for vsftpd 2.3.4 which has a known backdoor
         if service_name.lower() == "vsftpd" and version == "2.3.4":
-            self.console.print("[bold green]Known backdoor detected in vsftpd 2.3.4![/bold green]")
-            
-            # Add known exploits to the results
-            vsftpd_results = {
-                "vulnerabilities": [
-                    {
-                        "title": "vsftpd 2.3.4 - Backdoor Command Execution (Python)",
-                        "path": "unix/remote/49757.py",
-                        "type": "python",
-                        "description": "Python script for exploiting the vsftpd 2.3.4 backdoor"
-                    },
-                    {
-                        "title": "vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)",
-                        "path": "unix/remote/17491.rb",
-                        "type": "metasploit",
-                        "description": "Metasploit module for exploiting the vsftpd 2.3.4 backdoor"
-                    }
-                ]
-            }
-            
-            # Still run searchsploit to get the raw output
-            search_query = f"{service_name} {version}" if version else service_name
-            command = ["searchsploit", "--color", search_query]
-            
-            try:
-                result = run_tool(command, timeout=30)
-                raw_output = result["stdout"]
-                
-                # Generate timestamp for filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_file = f"searchsploit_{search_query.replace(' ', '_')}_{timestamp}.txt"
-                
-                # Save raw output to file
-                try:
-                    with open(output_file, 'w', encoding='utf-8') as f:
-                        f.write(raw_output)
-                    self.console.print(f"[green]Raw output saved to: {output_file}[/green]")
-                    
-                    # Verify file was written successfully
-                    if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                        self.console.print(f"[green]Successfully saved {os.path.getsize(output_file)} bytes to file[/green]")
-                    else:
-                        self.console.print(f"[yellow]Warning: Output file is empty or not created[/yellow]")
-                except Exception as e:
-                    self.console.print(f"[yellow]Error saving raw output: {str(e)}[/yellow]")
-                
-                # Add raw output to the results
-                vsftpd_results["raw_output"] = raw_output
-                
-                return vsftpd_results
-            except Exception as e:
-                self.console.print(f"[yellow]Error running searchsploit: {str(e)}[/yellow]")
-                # Still return the known vulnerabilities even if searchsploit fails
-                vsftpd_results["raw_output"] = f"Error running searchsploit: {str(e)}"
-                return vsftpd_results
+            self.logger.info("Known backdoor detected in vsftpd 2.3.4!")
+            return [{
+                "title": "vsftpd 2.3.4 - Backdoor Command Execution",
+                "path": "unix/remote/49757.py",
+                "type": "remote",
+                "platform": "unix"
+            }]
         
-        # Construct the search query with service name and version if available
-        search_query = f"{service_name} {version}" if version else service_name
+        # Construct search query
+        search_query = service_name
+        if version:
+            search_query = f"{service_name} {version}"
         
-        # Run searchsploit command
-        command = ["searchsploit", "--color", search_query]
-        
+        # Run searchsploit
         try:
-            self.console.print(f"[cyan]Running: {' '.join(command)}[/cyan]")
-            result = run_tool(command, timeout=30)
-            output = result["stdout"]
+            cmd = ["searchsploit", search_query]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            output = result.stdout
             
-            # Always display raw output first
-            self.console.print("\n[bold cyan]searchsploit output:[/bold cyan]")
-            self.console.print(output)
-            
-            # Save output to file for reference
+            # Save raw output to file with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"searchsploit_{search_query.replace(' ', '_')}_{timestamp}.txt"
+            output_file = f"searchsploit_{service_name.replace(' ', '_')}_{timestamp}.txt"
             
             try:
-                with open(output_file, 'w', encoding='utf-8') as f:
+                with open(output_file, 'w') as f:
                     f.write(output)
-                
-                # Verify file was written successfully
-                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                    self.console.print(f"[green]Output saved to: {output_file}[/green]")
-                else:
-                    self.console.print(f"[yellow]Warning: Output file is empty, trying alternative method...[/yellow]")
-                    # Try alternative method with direct redirection
-                    alt_output_file = f"searchsploit_{search_query.replace(' ', '_')}_alt_{timestamp}.txt"
-                    redirect_cmd = f"searchsploit --color {search_query} > {alt_output_file}"
-                    
-                    os.system(redirect_cmd)
-                    
-                    if os.path.exists(alt_output_file) and os.path.getsize(alt_output_file) > 0:
-                        self.console.print(f"[green]Alternative output file saved: {alt_output_file}[/green]")
-                        
-                        # Read the file content
-                        with open(alt_output_file, 'r', encoding='utf-8', errors='replace') as f:
-                            alt_output = f.read()
-                        
-                        # If we got content from the alternative method but not the original output
-                        if not output and alt_output:
-                            output = alt_output
-                            self.console.print("[green]Using content from alternative output file[/green]")
             except Exception as e:
-                self.console.print(f"[yellow]Error saving output to file: {str(e)}[/yellow]")
+                self.logger.warning(f"Could not save searchsploit output: {str(e)}")
             
-            # Parse the output to extract exploits
+            # Parse the output
             vulnerabilities = []
+            lines = output.split('\n')
             
-            # Skip if no results or error
-            if not output or "Exploits: No Results" in output:
-                return {"vulnerabilities": [], "raw_output": output}
-            
-            # Process output line by line to extract exploits
-            lines = output.splitlines()
             for line in lines:
-                line = line.strip()
-                if not line or "-----" in line or "Exploit Title" in line or "Shellcodes:" in line:
-                    continue
-                
-                # Handle both common output formats from searchsploit
-                exploit = {}
-                
-                # Format with | separator (newer searchsploit versions)
-                if "|" in line:
-                    parts = line.split("|")
+                if line and not line.startswith('Exploits:') and not line.startswith('Shellcodes:') and not line.startswith('Papers:'):
+                    # Extract exploit details
+                    parts = line.strip().split('  ')
+                    parts = [p for p in parts if p.strip()]
+                    
                     if len(parts) >= 2:
-                        exploit["title"] = parts[0].strip()
-                        exploit["path"] = parts[1].strip()
-                        vulnerabilities.append(exploit)
-                
-                # Format with whitespace separator (older searchsploit versions)
-                else:
-                    # Try to split on multiple spaces
-                    parts = re.split(r'\s{2,}', line)
-                    if len(parts) >= 2:
-                        exploit["title"] = parts[0].strip()
-                        # The path is typically the last part
-                        exploit["path"] = parts[-1].strip()
-                        vulnerabilities.append(exploit)
-            
-            # If no vulnerabilities were parsed but output exists, try an alternative parsing method
-            if not vulnerabilities and output:
-                self.console.print("[yellow]Standard parsing did not find vulnerabilities. Trying alternative parsing...[/yellow]")
-                
-                # Try to extract any paths that look like exploit paths
-                path_matches = re.findall(r'((?:windows|linux|unix|multiple|hardware|php|webapps)/[a-zA-Z0-9_/.-]+)', output)
-                if path_matches:
-                    for i, path in enumerate(path_matches):
-                        # Try to extract a title from lines before the path
-                        title = f"Exploit {i+1}"
-                        for line in lines:
-                            if path in line:
-                                # Try to get text before the path
-                                title_match = re.search(r'(.+?)(?=\s+' + re.escape(path) + ')', line)
-                                if title_match:
-                                    title = title_match.group(1).strip()
-                                break
+                        title = parts[0].strip()
+                        path = parts[-1].strip()
                         
-                        vulnerabilities.append({
-                            "title": title,
-                            "path": path
-                        })
-                    
-                    self.console.print(f"[green]Alternative parsing found {len(vulnerabilities)} potential exploits[/green]")
+                        if title and path:
+                            vulnerabilities.append({
+                                "title": title,
+                                "path": path,
+                                "type": "unknown",
+                                "platform": "unknown"
+                            })
             
-            # If still no vulnerabilities found but output exists, try a more generic approach
-            if not vulnerabilities and output:
-                self.console.print("[yellow]Could not parse exploits. Checking if raw command might help...[/yellow]")
+            if vulnerabilities:
+                return vulnerabilities
                 
-                # Check if there are any potentially useful lines
-                useful_lines = []
-                for line in lines:
-                    line = line.strip()
-                    if line and ".rb" in line or ".py" in line or ".c" in line or ".php" in line:
-                        useful_lines.append(line)
+            # If no results found, try alternative search
+            if not vulnerabilities and version:
+                self.logger.info(f"No results found, trying broader search for {service_name}")
+                return self.find_vulnerabilities_with_searchsploit(service_name)
                 
-                if useful_lines:
-                    self.console.print("[green]Found potentially useful lines in the output:[/green]")
-                    for i, line in enumerate(useful_lines):
-                        self.console.print(f"{i+1}. {line}")
-                    
-                    # Suggest running the raw searchsploit command
-                    self.console.print(f"\n[bold yellow]Recommendation: Try running raw searchsploit command:[/bold yellow]")
-                    self.console.print(f"searchsploit --color {search_query}")
-            
-            # Even if no vulnerabilities found, return the raw output for display to user
-            return {"vulnerabilities": vulnerabilities, "raw_output": output}
+            return vulnerabilities
         
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Error running searchsploit: {str(e)}")
+            return []
         except Exception as e:
-            # Log the error and return an error message
-            self.console.print(f"[red]Error searching for vulnerabilities: {str(e)}[/red]")
-            return {"vulnerabilities": [], "raw_output": f"Error: {str(e)}"}
+            self.logger.error(f"Unexpected error in vulnerability search: {str(e)}")
+            return []
 
     def prepare_exploit(self, exploit_path, target):
         """
