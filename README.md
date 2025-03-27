@@ -10,6 +10,10 @@ RedFlow הוא כלי Python מבוסס-CLI (עם אפשרות להרחבות GU
 - Passive and active information gathering
 - Open port and service identification
 - Automatic recommendation or execution of appropriate attack tools (e.g., Gobuster, Enum4linux, Hydra)
+- **Vulnerability detection and interactive exploitation**
+- **File discovery and downloading from web and FTP services**
+- **Recursive directory scanning**
+- **Integration with searchsploit for finding vulnerabilities and exploits**
 - Wordlist and attack method selection via simple CLI or GUI
 - Analysis of each tool's output
 - Context-aware help for understanding outputs and common error messages
@@ -22,6 +26,10 @@ RedFlow הוא כלי Python מבוסס-CLI (עם אפשרות להרחבות GU
 - ביצוע איסוף מידע פסיבי ואקטיבי
 - זיהוי פורטים פתוחים ושירותים
 - המלצה או הפעלה אוטומטית של כלי תקיפה המתאימים (למשל Gobuster, Enum4linux, Hydra)
+- **זיהוי פגיעויות וניצול אינטראקטיבי שלהן**
+- **גילוי והורדת קבצים משירותי אינטרנט ו-FTP**
+- **סריקת תיקיות באופן רקורסיבי**
+- **אינטגרציה עם searchsploit למציאת פגיעויות ומנגנוני ניצול**
 - אפשרות לבחירת רשימות מילים ושיטות תקיפה באמצעות ממשק CLI פשוט או GUI
 - ניתוח פלט של כל כלי
 - עזרה מבוססת-הקשר להבנת פלטים והודעות שגיאה נפוצות
@@ -39,6 +47,9 @@ cd RedFlow
 
 # Install dependencies / התקנת התלויות
 pip install -r requirements.txt
+
+# Install additional dependencies / התקנת תלויות נוספות
+pip install ftputil   # For FTP file handling
 ```
 
 ## CLI Usage / שימוש בממשק CLI
@@ -53,6 +64,9 @@ python redflow.py --target example.com --mode full
 
 ```bash
 usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output OUTPUT] [--interactive] [--gpt] [--verbose] [--version]
+                 [--list-files] [--interactive-download] [--port PORT] [--protocol {http,https,ftp}] [--download DOWNLOAD_URL]
+                 [--view VIEW_URL] [--results-dir RESULTS_DIR] [--exploit-menu] [--search-exploits SEARCH_EXPLOITS]
+                 [--port-to-exploit PORT_TO_EXPLOIT] [--service-to-exploit SERVICE_TO_EXPLOIT]
 ```
 
 | Parameter | Shortcut | Description | Default | Example |
@@ -66,6 +80,27 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
 | `--version` | | Display software version | | `--version` |
 | `--help` | `-h` | Display help | | `--help` |
 
+#### File Operations / פעולות על קבצים
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| `--list-files` | List discovered files from a previous scan | | `--list-files` |
+| `--interactive-download` | Interactively select and download discovered files | | `--interactive-download` |
+| `--port` | Port to use for file operations | `80` | `--port 8080` |
+| `--protocol` | Protocol to use for file operations | `http` | `--protocol https` |
+| `--download` | URL or path of file to download | | `--download http://target/file.txt` |
+| `--view` | URL or path of file to view | | `--view http://target/robots.txt` |
+| `--results-dir` | Directory of previous scan results to use for file operations | | `--results-dir ./scans/RedFlow_192.168.1.1` |
+
+#### Vulnerability Exploitation / ניצול פגיעויות
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| `--exploit-menu` | Show interactive exploit menu for discovered services | | `--exploit-menu` |
+| `--search-exploits` | Search for exploits for a specific service | | `--search-exploits vsftpd:2.3.4` |
+| `--port-to-exploit` | Port of the service to exploit | | `--port-to-exploit 21` |
+| `--service-to-exploit` | Name of the service to exploit | | `--service-to-exploit vsftpd` |
+
 ---
 
 | פרמטר | קיצור | תיאור | ערך ברירת מחדל | דוגמה |
@@ -78,6 +113,27 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
 | `--verbose` | `-v` | הצגת מידע מפורט בלוגים | `False` | `--verbose` |
 | `--version` | | הצגת גרסת התוכנה | | `--version` |
 | `--help` | `-h` | הצגת עזרה | | `--help` |
+
+#### פעולות על קבצים
+
+| פרמטר | תיאור | ערך ברירת מחדל | דוגמה |
+|-------|-------|----------------|-------|
+| `--list-files` | הצגת קבצים שהתגלו בסריקה קודמת | | `--list-files` |
+| `--interactive-download` | בחירה והורדה אינטראקטיבית של קבצים שהתגלו | | `--interactive-download` |
+| `--port` | פורט לשימוש בפעולות על קבצים | `80` | `--port 8080` |
+| `--protocol` | פרוטוקול לשימוש בפעולות על קבצים | `http` | `--protocol https` |
+| `--download` | נתיב או URL של קובץ להורדה | | `--download http://target/file.txt` |
+| `--view` | נתיב או URL של קובץ לצפייה | | `--view http://target/robots.txt` |
+| `--results-dir` | תיקיית תוצאות סריקה קודמת לשימוש בפעולות על קבצים | | `--results-dir ./scans/RedFlow_192.168.1.1` |
+
+#### ניצול פגיעויות
+
+| פרמטר | תיאור | ערך ברירת מחדל | דוגמה |
+|-------|-------|----------------|-------|
+| `--exploit-menu` | הצגת תפריט אינטראקטיבי לניצול פגיעויות בשירותים שהתגלו | | `--exploit-menu` |
+| `--search-exploits` | חיפוש מנגנוני ניצול לשירות ספציפי | | `--search-exploits vsftpd:2.3.4` |
+| `--port-to-exploit` | הפורט של השירות לניצול | | `--port-to-exploit 21` |
+| `--service-to-exploit` | שם השירות לניצול | | `--service-to-exploit vsftpd` |
 
 ### Usage Examples / דוגמאות לשימוש ב-CLI
 
@@ -96,9 +152,34 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
    python redflow.py --target example.com --mode active --output ./custom_dir/ --gpt
    ```
 
-4. **Scan with more verbose logging**:
+4. **List discovered files on port 80**:
    ```bash
-   python redflow.py --target example.com --verbose
+   python redflow.py --target 192.168.1.10 --list-files --port 80
+   ```
+
+5. **Interactive download of discovered files**:
+   ```bash
+   python redflow.py --target 192.168.1.10 --interactive-download --port 80
+   ```
+
+6. **View a specific file**:
+   ```bash
+   python redflow.py --view http://192.168.1.10/robots.txt
+   ```
+
+7. **Launch exploit menu for discovered services**:
+   ```bash
+   python redflow.py --exploit-menu
+   ```
+
+8. **Search for exploits for a specific service**:
+   ```bash
+   python redflow.py --search-exploits apache:2.4.7
+   ```
+
+9. **Exploit a specific service**:
+   ```bash
+   python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
    ```
 
 ---
@@ -118,10 +199,104 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
    python redflow.py --target example.com --mode active --output ./custom_dir/ --gpt
    ```
 
-4. **סריקה עם יותר מידע בלוגים**:
+4. **הצגת קבצים שהתגלו בפורט 80**:
    ```bash
-   python redflow.py --target example.com --verbose
+   python redflow.py --target 192.168.1.10 --list-files --port 80
    ```
+
+5. **הורדה אינטראקטיבית של קבצים שהתגלו**:
+   ```bash
+   python redflow.py --target 192.168.1.10 --interactive-download --port 80
+   ```
+
+6. **צפייה בקובץ ספציפי**:
+   ```bash
+   python redflow.py --view http://192.168.1.10/robots.txt
+   ```
+
+7. **הצגת תפריט ניצול פגיעויות לשירותים שהתגלו**:
+   ```bash
+   python redflow.py --exploit-menu
+   ```
+
+8. **חיפוש מנגנוני ניצול לשירות ספציפי**:
+   ```bash
+   python redflow.py --search-exploits apache:2.4.7
+   ```
+
+9. **ניצול שירות ספציפי**:
+   ```bash
+   python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
+   ```
+
+## New Features / תכונות חדשות
+
+### File Discovery and Download / גילוי והורדת קבצים
+
+The tool now provides comprehensive features for discovering and downloading files from web and FTP services:
+הכלי כעת מספק יכולות מקיפות לגילוי והורדת קבצים משירותי אינטרנט ו-FTP:
+
+- **Automatic file discovery**: During enumeration, the tool discovers files such as `robots.txt`, `sitemap.xml`, and other common files.
+- **Recursive directory scanning**: Ability to recursively scan discovered directories for deeper enumeration.
+- **Interactive file download**: Choose which discovered files to download through an interactive menu.
+- **File viewing**: View file contents directly from the CLI without downloading.
+
+***
+
+- **גילוי קבצים אוטומטי**: במהלך האיתור, הכלי מגלה קבצים כמו `robots.txt`, `sitemap.xml`, וקבצים נפוצים אחרים.
+- **סריקת תיקיות באופן רקורסיבי**: יכולת לסרוק תיקיות שהתגלו באופן רקורסיבי לאיתור עמוק יותר.
+- **הורדת קבצים אינטראקטיבית**: בחירה אילו קבצים שהתגלו להוריד באמצעות תפריט אינטראקטיבי.
+- **צפייה בקבצים**: צפייה בתוכן הקבצים ישירות מה-CLI ללא הורדה.
+
+#### Instructions / הוראות שימוש:
+
+To use these features after a scan:
+לשימוש בתכונות אלה לאחר סריקה:
+
+```bash
+# List discovered files / הצגת קבצים שהתגלו
+python redflow.py --target 192.168.1.10 --list-files
+
+# Interactive download / הורדה אינטראקטיבית
+python redflow.py --target 192.168.1.10 --interactive-download
+
+# Recursive directory scanning / סריקת תיקיות רקורסיבית
+# (Available within the interactive download menu, type "scan X" where X is the directory number)
+# (זמין בתוך תפריט ההורדה האינטראקטיבי, הקלד "scan X" כאשר X הוא מספר התיקייה)
+```
+
+### Vulnerability Exploitation / ניצול פגיעויות
+
+The tool now integrates with searchsploit to find and exploit vulnerabilities:
+הכלי כעת משתלב עם searchsploit למציאת וניצול פגיעויות:
+
+- **Vulnerability detection**: Automatically detects vulnerabilities in discovered services.
+- **Exploit search**: Searches for exploits using searchsploit based on service version information.
+- **Interactive exploit menu**: Provides an interactive menu to select and exploit vulnerabilities.
+- **Exploit preparation**: Automatically prepares exploits for execution by copying and configuring them.
+
+***
+
+- **זיהוי פגיעויות**: מזהה באופן אוטומטי פגיעויות בשירותים שהתגלו.
+- **חיפוש מנגנוני ניצול**: מחפש מנגנוני ניצול באמצעות searchsploit בהתבסס על מידע גרסת השירות.
+- **תפריט ניצול אינטראקטיבי**: מספק תפריט אינטראקטיבי לבחירה וניצול פגיעויות.
+- **הכנת מנגנוני ניצול**: מכין באופן אוטומטי מנגנוני ניצול להרצה על ידי העתקה והגדרה שלהם.
+
+#### Instructions / הוראות שימוש:
+
+To use these features after a scan:
+לשימוש בתכונות אלה לאחר סריקה:
+
+```bash
+# Launch exploit menu / הצגת תפריט ניצול
+python redflow.py --exploit-menu
+
+# Search for exploits for a specific service / חיפוש מנגנוני ניצול לשירות ספציפי
+python redflow.py --search-exploits apache:2.4.7
+
+# Exploit a specific service / ניצול שירות ספציפי
+python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
+```
 
 ## GUI Interface / ממשק GUI
 
@@ -166,6 +341,7 @@ RedFlow תומך גם בשימוש בקובץ תצורה להגדרת פרמטר
 tools:
   nmap: /usr/bin/nmap
   gobuster: /usr/bin/gobuster
+  searchsploit: /usr/bin/searchsploit
 
 scripts:
   custom_scan: /path/to/custom_script.py
@@ -175,6 +351,11 @@ gpt:
   model: "gpt-4"
   temperature: 0.7
   custom_prompt: "Examine scan results and find vulnerabilities"
+  
+file_operations:
+  extensions_to_download: [".txt", ".php", ".html", ".xml", ".conf", ".bak", ".old", ".sql", ".db"]
+  max_file_size: 10485760  # 10MB
+  recursive_depth: 3
 ```
 
 ## System Requirements / דרישות מערכת
@@ -192,6 +373,8 @@ This project requires the following tools to be installed:
 - Sublist3r
 - whatweb
 - wafw00f
+- searchsploit
+- ftputil (Python package: `pip install ftputil`)
 
 ## Support / קבלת תמיכה
 
