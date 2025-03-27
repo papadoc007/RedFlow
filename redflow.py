@@ -171,6 +171,13 @@ def parse_args():
         help="Name of the service to exploit (e.g. vsftpd, apache)"
     )
     
+    exploit_operations.add_argument(
+        "--msfconsole",
+        dest="run_msfconsole",
+        action="store_true",
+        help="Start Metasploit console directly and optionally target a specific IP"
+    )
+    
     return parser.parse_args()
 
 def handle_file_operations(args, logger, console):
@@ -311,7 +318,7 @@ def handle_exploit_operations(args, logger, console):
     
     # Determine target from results dir if not provided
     target = args.target
-    if not target:
+    if not target and not args.run_msfconsole:
         metadata_file = os.path.join(args.results_dir, "metadata.json")
         if os.path.exists(metadata_file):
             import json
@@ -322,7 +329,7 @@ def handle_exploit_operations(args, logger, console):
             except:
                 pass
     
-    if not target:
+    if not target and not args.run_msfconsole:
         logger.error("Target not specified and could not be determined from scan results")
         console.print("[bold red]Target not specified and could not be determined from scan results[/bold red]")
         return
@@ -350,6 +357,12 @@ def handle_exploit_operations(args, logger, console):
     
     # Set target for enumeration
     enumeration.target = target
+    
+    # Check if we want to run msfconsole directly
+    if args.run_msfconsole:
+        console.print(f"[bold green]Starting Metasploit Console{' targeting ' + target if target else ''}[/bold green]")
+        enumeration.run_msfconsole(target)
+        return
     
     # Check if we're searching for exploits for a specific service
     if args.search_exploits:
@@ -461,7 +474,7 @@ def main():
             return
         
         # Check if we're doing exploit operations
-        if args.exploit_menu or args.search_exploits or args.service_to_exploit:
+        if args.exploit_menu or args.search_exploits or args.service_to_exploit or args.run_msfconsole:
             handle_exploit_operations(args, logger, console)
             return
         
@@ -471,6 +484,7 @@ def main():
             console.print("[bold red]Target is required for scanning. Use --target option.[/bold red]")
             console.print("For file operations on previous scans, use --list-files, --download, --interactive-download, or --view")
             console.print("For exploit operations, use --exploit-menu, --search-exploits, or --service-to-exploit")
+            console.print("To start msfconsole directly, use --msfconsole")
             return
         
         # Check system requirements
