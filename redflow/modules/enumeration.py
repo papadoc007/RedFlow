@@ -1872,342 +1872,292 @@ class Enumeration:
 
     def prepare_exploit(self, exploit_path, target):
         """
-        Prepare exploit for execution
+        Prepare an exploit for execution by copying it locally and determining how to run it
         
         Args:
-            exploit_path (str): Path to exploit in searchsploit
-            target (str): IP address or hostname of target
+            exploit_path (str): Path to the exploit
+            target (str): Target IP or hostname
             
         Returns:
-            dict: Details of prepared exploit or None if failed
+            dict: Information about the prepared exploit or None if preparation failed
         """
-        self.console.print(f"[bold cyan]Preparing exploit: {exploit_path}[/bold cyan]")
-        
         try:
-            # Copy exploit to local system
-            command = ["searchsploit", "-m", exploit_path]
-            copy_result = run_tool(command, timeout=30)
+            self.logger.info(f"Preparing exploit: {exploit_path} for target: {target}")
             
-            if copy_result["returncode"] != 0:
-                self.console.print(f"[red]Error copying exploit: {copy_result['stderr']}[/red]")
-                return None
-            
-            # Find local path of copied file
-            output = copy_result["stdout"]
-            local_path_match = re.search(r"Copied to: (.+)", output)
-            
-            if not local_path_match:
-                self.console.print("[red]Could not find local exploit path[/red]")
-                return None
-            
-            local_path = local_path_match.group(1).strip()
-            
-            # Identify exploit type by file extension
-            exploit_type = "unknown"
-            command = None
-            args = [target]
-            
-            if local_path.endswith(".py"):
-                exploit_type = "python"
-                command = f"python {local_path} {target}"
-            elif local_path.endswith(".rb"):
-                exploit_type = "ruby"
-                command = f"ruby {local_path} {target}"
-            elif local_path.endswith(".c"):
-                exploit_type = "c"
-                command = f"gcc {local_path} -o {local_path}.exe && {local_path}.exe {target}"
-            elif local_path.endswith(".sh"):
-                exploit_type = "shell"
-                command = f"bash {local_path} {target}"
-            elif local_path.endswith(".php"):
-                exploit_type = "php"
-                command = f"php {local_path} {target}"
-            else:
-                exploit_type = "unknown"
-                command = f"cat {local_path}"  # Show file content if type can't be identified
-            
-            self.console.print(f"[green]Exploit successfully copied to: {local_path}[/green]")
-            
-            return {
+            # Initialize exploit info
+            exploit_info = {
                 "path": exploit_path,
-                "local_path": local_path,
-                "type": exploit_type,
-                "command": command,
-                "args": args
+                "local_path": "",
+                "type": "unknown",
+                "command": "",
+                "args": []
             }
             
+            # Check if this is a Metasploit module path
+            msf_path = None
+            
+            # Check different platform paths to determine if this is a Metasploit module
+            if "/linux/local/" in exploit_path or "/unix/local/" in exploit_path:
+                # Extract module path for Metasploit
+                msf_path = self._extract_metasploit_path(exploit_path)
+                exploit_info["type"] = "metasploit"
+                exploit_info["msf_module"] = msf_path
+                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
+                return exploit_info
+                
+            elif "/windows/" in exploit_path:
+                # Extract module path for Metasploit
+                msf_path = self._extract_metasploit_path(exploit_path)
+                exploit_info["type"] = "metasploit"
+                exploit_info["msf_module"] = msf_path
+                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
+                return exploit_info
+                
+            elif "/unix/" in exploit_path:
+                # Extract module path for Metasploit
+                msf_path = self._extract_metasploit_path(exploit_path)
+                exploit_info["type"] = "metasploit"
+                exploit_info["msf_module"] = msf_path
+                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
+                return exploit_info
+                
+            elif "/multi/" in exploit_path:
+                # Extract module path for Metasploit
+                msf_path = self._extract_metasploit_path(exploit_path)
+                exploit_info["type"] = "metasploit"
+                exploit_info["msf_module"] = msf_path
+                exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
+                return exploit_info
+            
+            # Special case for vsftpd 2.3.4 backdoor
+            elif "vsftpd" in exploit_path.lower() and "2.3.4" in exploit_path and "backdoor" in exploit_path.lower():
+                exploit_info["type"] = "metasploit"
+                exploit_info["msf_module"] = "unix/ftp/vsftpd_234_backdoor"
+                exploit_info["command"] = f"msfconsole -q -x 'use exploit/unix/ftp/vsftpd_234_backdoor; set RHOSTS {target}; run'"
+                return exploit_info
+                
+            # Handle non-Metasploit exploits
+            # Check if we can access the file
+            if not os.path.exists(exploit_path):
+                self.logger.warning(f"Exploit path does not exist: {exploit_path}")
+                
+                # Try to find the exploit path
+                exploit_dir = self.config.exploits_dir or "/usr/share/exploitdb/"
+                possible_path = os.path.join(exploit_dir, exploit_path.lstrip("/"))
+                
+                if os.path.exists(possible_path):
+                    exploit_path = possible_path
+                    self.logger.info(f"Found exploit at: {exploit_path}")
+                else:
+                    # If we couldn't find the file, and it looks like a Metasploit path, try to extract the module
+                    if any(x in exploit_path for x in ["unix/", "windows/", "multi/", "linux/"]):
+                        msf_path = self._extract_metasploit_path(exploit_path)
+                        if msf_path:
+                            exploit_info["type"] = "metasploit"
+                            exploit_info["msf_module"] = msf_path
+                            exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
+                            return exploit_info
+                    
+                    # Last resort: look for the file name only
+                    file_name = os.path.basename(exploit_path)
+                    for root, _, files in os.walk(exploit_dir):
+                        if file_name in files:
+                            exploit_path = os.path.join(root, file_name)
+                            self.logger.info(f"Found exploit by filename at: {exploit_path}")
+                            break
+                    
+                    if not os.path.exists(exploit_path):
+                        self.logger.error(f"Could not locate exploit file: {exploit_path}")
+                        return None
+            
+            # Copy exploit to working directory for easier use
+            exploits_folder = os.path.join(self.config.output_dir, "exploits")
+            if not os.path.exists(exploits_folder):
+                os.makedirs(exploits_folder)
+                
+            local_name = os.path.basename(exploit_path)
+            local_path = os.path.join(exploits_folder, local_name)
+            
+            # Copy the file
+            shutil.copy2(exploit_path, local_path)
+            exploit_info["local_path"] = local_path
+            
+            # Determine exploit type based on extension and content
+            extension = os.path.splitext(local_path)[1].lower()
+            
+            # First read the file to better determine the type
+            with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read(500)  # Read the first 500 characters
+            
+            # Check for different exploit types
+            if extension == ".py" or "#!/usr/bin/python" in content or "import " in content:
+                exploit_info["type"] = "python"
+                exploit_info["command"] = f"python {local_path} {target}"
+                
+            elif extension == ".rb" or "#!/usr/bin/ruby" in content or "require '" in content:
+                exploit_info["type"] = "ruby"
+                exploit_info["command"] = f"ruby {local_path} {target}"
+                
+            elif extension == ".php" or "<?php" in content:
+                exploit_info["type"] = "php"
+                exploit_info["command"] = f"php {local_path} {target}"
+                
+            elif extension == ".pl" or "#!/usr/bin/perl" in content or "use strict;" in content:
+                exploit_info["type"] = "perl"
+                exploit_info["command"] = f"perl {local_path} {target}"
+                
+            elif extension == ".c" or "#include <" in content:
+                exploit_info["type"] = "c"
+                # C files need to be compiled
+                compiled_name = os.path.splitext(local_name)[0]
+                output_path = os.path.join(exploits_folder, compiled_name)
+                exploit_info["command"] = f"gcc -o {output_path} {local_path} && {output_path} {target}"
+                
+            elif extension == ".sh" or "#!/bin/bash" in content or "#!/bin/sh" in content:
+                exploit_info["type"] = "bash"
+                exploit_info["command"] = f"chmod +x {local_path} && {local_path} {target}"
+                
+            else:
+                # Check if the file is text-based
+                try:
+                    if content and not self._is_binary(content):
+                        # It's a text file, but we don't know exactly what type
+                        # Try to identify by looking at specific patterns
+                        if any(x in content.lower() for x in ["msf", "metasploit", "msfconsole"]):
+                            # This might be a Metasploit usage guide
+                            for line in content.split('\n'):
+                                if "use " in line.lower() and ("exploit/" in line.lower() or "auxiliary/" in line.lower()):
+                                    msf_path = line.split("use ")[1].strip()
+                                    # Remove 'exploit/' prefix if present
+                                    if msf_path.startswith("exploit/"):
+                                        msf_path = msf_path[8:]
+                                    exploit_info["type"] = "metasploit"
+                                    exploit_info["msf_module"] = msf_path
+                                    exploit_info["command"] = f"msfconsole -q -x 'use exploit/{msf_path}; set RHOSTS {target}; run'"
+                                    return exploit_info
+                        
+                        # If we can't determine a specific type, just set as "text"
+                        exploit_info["type"] = "text"
+                        exploit_info["command"] = f"cat {local_path}"
+                    else:
+                        # Binary file
+                        exploit_info["type"] = "binary"
+                        exploit_info["command"] = f"chmod +x {local_path} && {local_path} {target}"
+                except:
+                    # If we can't determine, just try to run it
+                    exploit_info["type"] = "unknown"
+                    exploit_info["command"] = f"chmod +x {local_path} && {local_path} {target}"
+            
+            return exploit_info
+                
         except Exception as e:
-            self.console.print(f"[red]Error preparing exploit: {str(e)}[/red]")
-            self.logger.error(f"Error preparing exploit {exploit_path}: {str(e)}")
+            self.logger.error(f"Error preparing exploit: {str(e)}")
             return None
 
-    def display_exploit_instructions(self, exploit_info, target):
+    def _is_binary(self, content):
         """
-        Display instructions for running the exploit
+        Check if content appears to be binary
         
         Args:
-            exploit_info (dict): Details of prepared exploit
-            target (str): IP address or hostname of target
-        """
-        self.console.print("\n[bold green]Exploit prepared successfully![/bold green]")
-        self.console.print(f"[cyan]Exploit type: {exploit_info['type']}[/cyan]")
-        self.console.print(f"[cyan]Local path: {exploit_info['local_path']}[/cyan]")
-        
-        self.console.print("\n[bold yellow]Execution instructions:[/bold yellow]")
-        
-        if exploit_info["type"] == "unknown":
-            self.console.print("[yellow]Exploit type not recognized. Here's the file content:[/yellow]")
-            try:
-                with open(exploit_info["local_path"], "r", errors="ignore") as f:
-                    content = f.read(1000)  # Show only first 1000 characters
-                self.console.print(f"```\n{content}\n...\n```")
-                self.console.print("[yellow]You need to examine the file and determine how to use it.[/yellow]")
-            except Exception as e:
-                self.console.print(f"[red]Error reading file content: {str(e)}[/red]")
-        else:
-            self.console.print(f"[green]To run the exploit, execute the following command:[/green]")
-            self.console.print(f"[bold white]{exploit_info['command']}[/bold white]")
-            
-            if exploit_info["type"] == "c":
-                self.console.print("[yellow]Note: C file requires compilation before execution.[/yellow]")
-
-    def interactive_exploit_menu(self, menu_type, service_name, version, target):
-        """
-        Interactive menu for finding and selecting exploits
-        
-        Args:
-            menu_type (str): Type of menu to display (manual, service, etc.)
-            service_name (str): Name of the service to find exploits for
-            version (str): Version of the service
-            target (str): Target host or IP address
+            content (str): File content
             
         Returns:
-            bool: Whether an exploit was successfully executed
+            bool: True if content appears to be binary
         """
-        # Clear screen for better visibility
-        os.system('cls' if os.name == 'nt' else 'clear')
+        # Check for null bytes or high number of non-printable characters
+        # which indicates a binary file
+        non_printable = 0
+        for char in content:
+            if char == '\0' or ord(char) > 127:
+                non_printable += 1
         
-        self.console.print(f"\n[bold cyan]Exploit Search for {service_name} {version}[/bold cyan]")
-        self.console.print("[yellow]Searching for known vulnerabilities...[/yellow]")
+        # If more than 10% is non-printable, it's likely binary
+        return non_printable > len(content) * 0.1
+
+    def _extract_metasploit_path(self, exploit_path):
+        """
+        Extract Metasploit module path from the given exploit path
         
-        # First, try automatic search with searchsploit
-        search_results = self.find_vulnerabilities_with_searchsploit(service_name, version)
-        
-        # Display search options regardless of whether we found results
-        self.console.print("\n[bold blue]Search Options:[/bold blue]")
-        self.console.print("[cyan]1.[/cyan] Use default search terms: [bold]{} {}[/bold]".format(service_name, version))
-        self.console.print("[cyan]2.[/cyan] Enter custom search terms")
-        self.console.print("[cyan]3.[/cyan] Run searchsploit with current results")
-        self.console.print("[cyan]4.[/cyan] Return to main menu")
-        
-        self.console.print("\n[yellow]Select an option (1-4):[/yellow]")
-        option = input("> ").strip()
-        
-        if option == "1":
-            # Keep current search results
-            pass
-        elif option == "2":
-            # Custom search
-            self.console.print("\n[cyan]Enter custom search terms:[/cyan]")
-            search_terms = input("> ").strip()
+        Args:
+            exploit_path (str): The path to the exploit
             
-            if not search_terms:
-                self.console.print("[red]Search terms cannot be empty.[/red]")
-                return self.interactive_exploit_menu(menu_type, service_name, version, target)
-            
-            # Run searchsploit with custom terms
-            self.console.print(f"[yellow]Running searchsploit for: {search_terms}[/yellow]")
-            
-            try:
-                # Create a temporary file for searchsploit output
-                temp_output_file = os.path.join(self.config.output_dir, "searchsploit_temp.txt")
-                
-                # Run searchsploit with custom search terms
-                searchsploit_cmd = ["searchsploit", search_terms]
-                result = run_tool(searchsploit_cmd, self.logger, timeout=30)
-                
-                if result["returncode"] != 0:
-                    self.console.print(f"[red]Error running searchsploit: {result['stderr']}[/red]")
-                    return False
-                
-                # Save output to temporary file
-                with open(temp_output_file, "w", encoding="utf-8") as f:
-                    f.write(result["stdout"])
-                
-                # Parse the results
-                vulnerabilities = []
-                output = result["stdout"]
-                
-                # Parse searchsploit output
-                for line in output.splitlines():
-                    # Skip header or empty lines
-                    if not line.strip() or "------" in line or "Exploit Title" in line or "Exploits:" in line:
-                        continue
-                    
-                    # Try to extract vulnerability details
-                    try:
-                        # Split by multiple spaces
-                        parts = re.split(r'\s{2,}', line.strip())
-                        if len(parts) >= 2:
-                            vuln = {
-                                "title": parts[0].strip(),
-                                "path": parts[-1].strip() if len(parts) > 2 else "",
-                                "raw": line.strip()
-                            }
-                            vulnerabilities.append(vuln)
-                    except Exception as e:
-                        self.logger.debug(f"Error parsing searchsploit line: {str(e)}")
-                
-                # Update search results
-                search_results = {
-                    "service": search_terms,
-                    "version": "",
-                    "vulnerabilities": vulnerabilities,
-                    "searchsploit_command": " ".join(searchsploit_cmd),
-                    "raw_output": output
-                }
-                
-                if not vulnerabilities:
-                    self.console.print("[red]No vulnerabilities found with those search terms.[/red]")
-                    self.console.print("[yellow]Would you like to try another search? (y/n)[/yellow]")
-                    retry = input("> ").strip().lower()
-                    
-                    if retry in ['y', 'yes']:
-                        return self.interactive_exploit_menu(menu_type, service_name, version, target)
-                    else:
-                        return False
-            except Exception as e:
-                self.console.print(f"[red]Error performing custom search: {str(e)}[/red]")
-                self.logger.error(f"Error in custom searchsploit search: {str(e)}")
-                return False
-                
-        elif option == "3":
-            # Run searchsploit directly
-            if not search_results.get("vulnerabilities", []):
-                self.console.print("[red]No search results available to display.[/red]")
-                return self.interactive_exploit_menu(menu_type, service_name, version, target)
-                
-        elif option == "4":
-            # Return to main menu
-            return False
-        else:
-            self.console.print("[red]Invalid option. Please select 1-4.[/red]")
-            return self.interactive_exploit_menu(menu_type, service_name, version, target)
+        Returns:
+            str: The Metasploit module path, or None if no module path is found
+        """
+        # Special cases for very common exploits
+        if "vsftpd" in exploit_path.lower() and "2.3.4" in exploit_path:
+            return "unix/ftp/vsftpd_234_backdoor"
         
-        # Display the exploits if we have any
-        vulnerabilities = search_results.get("vulnerabilities", [])
+        if "eternal blue" in exploit_path.lower() or "ms17-010" in exploit_path.lower():
+            return "windows/smb/ms17_010_eternalblue"
         
-        if vulnerabilities:
-            self.console.print(f"\n[bold green]Found {len(vulnerabilities)} potential exploits:[/bold green]")
-            
-            # Display vulnerabilities in a formatted list
-            for i, vuln in enumerate(vulnerabilities, 1):
-                title = vuln.get("title", "Unknown")
-                path = vuln.get("path", "")
+        if "shellshock" in exploit_path.lower() or "cgi-bin" in exploit_path.lower():
+            return "multi/http/apache_mod_cgi_bash_env_exec"
+        
+        # Common module path patterns
+        patterns = [
+            r'/(unix|windows|multi|linux)/([^/]+)/([^/]+)$',  # Basic pattern
+            r'/(unix|windows|multi|linux)/([^/]+)/([^/]+)/([^/]+)$',  # More specific pattern
+            r'/(unix|windows|multi|linux)/([^/]+)/([^/]+)\.rb$',  # Ruby file pattern
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, exploit_path)
+            if match:
+                # Extract the components
+                platform = match.group(1)  # unix, windows, multi, linux
+                category = match.group(2)  # http, ftp, smb, etc.
                 
-                self.console.print(f"[cyan]{i}.[/cyan] {title}")
-                if path:
-                    self.console.print(f"   [blue]Path: {path}[/blue]")
-            
-            # Let user select a vulnerability
-            self.console.print("\n[yellow]Select an exploit to use (number), 's' for new search, or 'q' to quit:[/yellow]")
-            selection = input("> ").strip().lower()
-            
-            if selection == 'q':
-                return False
-            elif selection == 's':
-                return self.interactive_exploit_menu(menu_type, service_name, version, target)
-            elif selection.isdigit() and 1 <= int(selection) <= len(vulnerabilities):
-                idx = int(selection) - 1
-                vuln = vulnerabilities[idx]
+                # Start building the path
+                msf_path = f"{platform}/{category}/"
                 
-                # Check if we have a path
-                if vuln.get("path"):
-                    exploit_path = vuln["path"]
-                    self.console.print(f"[green]Selected exploit: {vuln['title']}[/green]")
-                    self.console.print(f"[cyan]Path: {exploit_path}[/cyan]")
-                    
-                    # Use prepare_exploit to get instructions
-                    exploit_info = self.prepare_exploit(exploit_path, target)
-                    
-                    if exploit_info:
-                        self.display_exploit_instructions(exploit_info, target)
+                # Add the rest based on the matched pattern
+                if len(match.groups()) >= 3:
+                    exploit_name = match.group(3).replace(".rb", "")
+                    msf_path += exploit_name
+                
+                # If there's a 4th component in some cases
+                if len(match.groups()) >= 4:
+                    sub_exploit = match.group(4).replace(".rb", "")
+                    msf_path += f"/{sub_exploit}"
+                
+                return msf_path
+                
+        # Try simple pattern extraction for known platforms
+        known_platforms = ["unix", "windows", "multi", "linux"]
+        known_services = ["ftp", "http", "ssh", "smb", "mysql", "mssql", "postgresql"]
+        
+        # Check if path contains platform and service
+        for platform in known_platforms:
+            if f"/{platform}/" in exploit_path.lower():
+                for service in known_services:
+                    if f"/{service}/" in exploit_path.lower() or service in exploit_path.lower():
+                        # Extract name based on file name
+                        file_name = os.path.basename(exploit_path)
+                        name_part = os.path.splitext(file_name)[0].lower()
                         
-                        # Ask if user wants to run the exploit
-                        self.console.print("\n[yellow]Would you like to run this exploit now? (y/n)[/yellow]")
-                        run_choice = input("> ").strip().lower()
-                        
-                        if run_choice in ['y', 'yes']:
-                            try:
-                                self.console.print(f"[bold yellow]Running exploit: {exploit_info['command']}[/bold yellow]")
-                                
-                                # Handle different exploit types
-                                import subprocess
-                                if exploit_info['type'] == 'python':
-                                    process = subprocess.Popen(exploit_info['command'], shell=True)
-                                    process.wait()
-                                elif exploit_info['type'] == 'ruby':
-                                    process = subprocess.Popen(exploit_info['command'], shell=True)
-                                    process.wait()
-                                elif exploit_info['type'] == 'php':
-                                    process = subprocess.Popen(exploit_info['command'], shell=True)
-                                    process.wait()
-                                elif exploit_info['type'] == 'perl':
-                                    process = subprocess.Popen(exploit_info['command'], shell=True)
-                                    process.wait()
-                                elif exploit_info['type'] == 'c':
-                                    # Compile and run C exploit
-                                    self.console.print("[yellow]Compiling C exploit...[/yellow]")
-                                    compile_cmd = f"gcc -o /tmp/exploit {exploit_info['local_path']}"
-                                    compile_process = subprocess.Popen(compile_cmd, shell=True)
-                                    compile_process.wait()
-                                    
-                                    if compile_process.returncode == 0:
-                                        run_cmd = f"/tmp/exploit {target}"
-                                        process = subprocess.Popen(run_cmd, shell=True)
-                                        process.wait()
-                                    else:
-                                        self.console.print("[red]Failed to compile C exploit.[/red]")
-                                else:
-                                    # Default case: run as is
-                                    process = subprocess.Popen(exploit_info['command'], shell=True)
-                                    process.wait()
-                                
-                                self.console.print("\n[bold green]Exploit execution completed.[/bold green]")
-                                self.console.print("[yellow]Note: Some exploits may need additional tweaking to work properly in your environment.[/yellow]")
-                                self.console.print("[yellow]Always examine exploit code before running, especially if it requires compilation or root privileges.[/yellow]")
-                                
-                            except Exception as e:
-                                self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
-                                self.logger.error(f"Error running exploit: {str(e)}")
-                        
-                        # Ask if user wants to try another exploit
-                        self.console.print("\n[yellow]Would you like to select another exploit? (y/n)[/yellow]")
-                        another = input("> ").strip().lower()
-                        
-                        if another in ['y', 'yes']:
-                            return self.interactive_exploit_menu(menu_type, service_name, version, target)
-                        return True
-                    else:
-                        self.console.print("[red]Failed to prepare exploit.[/red]")
-                else:
-                    self.console.print("[red]No exploit path available for this vulnerability.[/red]")
-                    self.console.print("[yellow]Would you like to select another vulnerability? (y/n)[/yellow]")
-                    retry = input("> ").strip().lower()
-                    
-                    if retry in ['y', 'yes']:
-                        # Display the list again and let user select
-                        return self.interactive_exploit_menu(menu_type, service_name, version, target)
-            else:
-                self.console.print("[red]Invalid selection.[/red]")
-                return self.interactive_exploit_menu(menu_type, service_name, version, target)
-        else:
-            # No vulnerabilities found, offer options
-            self.console.print("[red]No exploits found for this service.[/red]")
-            self.console.print("[yellow]Would you like to try a custom search? (y/n)[/yellow]")
-            retry = input("> ").strip().lower()
+                        # Create reasonable path
+                        return f"{platform}/{service}/{name_part}"
+        
+        # Couldn't extract a path
+        return None
+        
+    def _is_binary(self, content):
+        """
+        Check if content appears to be binary
+        
+        Args:
+            content (str): File content
             
-            if retry in ['y', 'yes']:
-                return self.interactive_exploit_menu("manual", service_name, version, target)
-            
-        return False
+        Returns:
+            bool: True if content appears to be binary
+        """
+        # Check for null bytes or high number of non-printable characters
+        # which indicates a binary file
+        non_printable = 0
+        for char in content:
+            if char == '\0' or ord(char) > 127:
+                non_printable += 1
+        
+        # If more than 10% is non-printable, it's likely binary
+        return non_printable > len(content) * 0.1
