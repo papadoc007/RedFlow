@@ -15,6 +15,7 @@ import requests
 import subprocess
 import shutil
 import socket
+from datetime import datetime
 
 from redflow.utils.logger import get_module_logger
 from redflow.utils.helpers import run_tool
@@ -2551,6 +2552,16 @@ class Enumeration:
                         self.console.print("\n[bold cyan]searchsploit output:[/bold cyan]")
                         self.console.print(output)
                         
+                        # Save output to file for reference
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_file = f"searchsploit_{search_term.replace(' ', '_')}_{timestamp}.txt"
+                        try:
+                            with open(output_file, 'w') as f:
+                                f.write(output)
+                            self.console.print(f"[green]Output saved to: {output_file}[/green]")
+                        except Exception as e:
+                            self.console.print(f"[yellow]Could not save output to file: {str(e)}[/yellow]")
+                        
                         if "Exploits: No Results" not in output and "No Results" not in output:
                             # Parse and display results
                             exploit_lines = []
@@ -2793,6 +2804,13 @@ class Enumeration:
             self.console.print("[red]No exploit information available[/red]")
             return
         
+        # Ensure we have a valid target, not localhost
+        if target == "localhost" or target == "127.0.0.1":
+            if hasattr(self.config, 'target') and self.config.target:
+                original_target = target
+                target = self.config.target
+                self.console.print(f"[yellow]Warning: Changed target from {original_target} to {target}[/yellow]")
+        
         self.console.print("\n[bold]Exploit Information:[/bold]")
         
         exploit_type = exploit_info.get("type", "unknown")
@@ -2803,6 +2821,13 @@ class Enumeration:
             msf_module = exploit_info.get("msf_module", "")
             if msf_module:
                 self.console.print(f"Module: {msf_module}")
+                
+                # Ensure we're using the correct target IP for the module command
+                orig_target = target
+                if target == "localhost" or target == "127.0.0.1":
+                    if hasattr(self.config, 'target') and self.config.target:
+                        target = self.config.target
+                        self.console.print(f"[yellow]Warning: Replacing 'localhost' with actual target: {target}[/yellow]")
                 
                 self.console.print("\n[bold]To run this exploit using Metasploit:[/bold]")
                 self.console.print("1. Start msfconsole:")
@@ -2818,27 +2843,46 @@ class Enumeration:
                 one_line_cmd = f"msfconsole -q -x 'use exploit/{msf_module}; set RHOSTS {target}; run'"
                 self.console.print(one_line_cmd)
                 
-                # Ask if user wants to run the exploit
-                self.console.print("\n[bold yellow]Would you like to run this exploit now? (y/n)[/bold yellow]")
-                response = input("> ").strip().lower()
-                
-                if response in ["y", "yes"]:
+                # Update the command in the exploit_info
+                if "command" in exploit_info:
+                    exploit_info["command"] = one_line_cmd
+            
+            # Ask if user wants to run the exploit
+            self.console.print("\n[bold yellow]Would you like to run this exploit now? (y/n)[/bold yellow]")
+            response = input("> ").strip().lower()
+            
+            if response in ["y", "yes"]:
+                max_tries = 2  # Try up to 2 times
+                for attempt in range(1, max_tries + 1):
                     try:
-                        self.console.print(f"\n[cyan]Running: {one_line_cmd}[/cyan]")
+                        self.console.print(f"\n[cyan]Running: {one_line_cmd} (Attempt {attempt}/{max_tries})[/cyan]")
                         command = ["msfconsole", "-q", "-x", f"use exploit/{msf_module}; set RHOSTS {target}; run"]
                         result = run_tool(command, timeout=600)  # Longer timeout for Metasploit
                         
-                        if result["returncode"] != 0:
-                            self.console.print(f"[red]Error running Metasploit: {result['stderr']}[/red]")
+                        if "Exploit completed" in result["stdout"] and "session was created" in result["stdout"]:
+                            self.console.print("[green]Exploit successfully executed![/green]")
+                            break
+                        elif result["returncode"] != 0:
+                            self.console.print(f"[red]Error running Metasploit (Attempt {attempt}/{max_tries}): {result['stderr']}[/red]")
+                            if attempt < max_tries:
+                                self.console.print("[yellow]Retrying...[/yellow]")
+                                time.sleep(2)  # Wait a bit before retrying
+                            else:
+                                self.console.print("[red]All attempts failed.[/red]")
                         
                         # Display output regardless of return code
                         if result["stdout"]:
                             self.console.print(result["stdout"])
                     except Exception as e:
-                        self.console.print(f"[red]Error: {str(e)}[/red]")
-            else:
-                self.console.print("[yellow]Metasploit module path not found[/yellow]")
-                
+                        self.console.print(f"[red]Error (Attempt {attempt}/{max_tries}): {str(e)}[/red]")
+                        if attempt < max_tries:
+                            self.console.print("[yellow]Retrying...[/yellow]")
+                            time.sleep(2)  # Wait a bit before retrying
+                        else:
+                            self.console.print("[red]All attempts failed.[/red]")
+        else:
+            self.console.print("[yellow]Metasploit module path not found[/yellow]")
+            
         # Display local file path if available
         if "local_path" in exploit_info:
             self.console.print(f"Local path: {exploit_info['local_path']}")
@@ -2847,32 +2891,77 @@ class Enumeration:
         if "command" in exploit_info and exploit_type != "metasploit":
             # Replace 'localhost' or similar with the actual target
             command = exploit_info["command"]
-            command = command.replace("localhost", target)
-            command = command.replace("127.0.0.1", target)
+            
+            # Check if the command contains localhost and replace it
+            if "localhost" in command or "127.0.0.1" in command:
+                original_command = command
+                command = command.replace("localhost", target)
+                command = command.replace("127.0.0.1", target)
+                self.console.print(f"[yellow]Warning: Original command contained localhost, changed to target IP[/yellow]")
+                self.console.print(f"[yellow]Original: {original_command}[/yellow]")
             
             self.console.print(f"\n[bold]Command to run:[/bold]")
             self.console.print(command)
+            
+            # Special handling for vsftpd exploit which might need multiple attempts
+            is_vsftpd_exploit = "vsftpd" in command.lower() and "49757" in command
+            max_tries = 3 if is_vsftpd_exploit else 1
             
             # Ask if user wants to run the command
             self.console.print("\n[bold yellow]Would you like to run this command now? (y/n)[/bold yellow]")
             response = input("> ").strip().lower()
             
             if response in ["y", "yes"]:
-                try:
-                    self.console.print(f"\n[cyan]Running: {command}[/cyan]")
-                    # Use shell=True to handle complex commands with pipes, redirects, etc.
-                    result = run_tool(command, shell=True, timeout=300)
-                    
-                    if result["returncode"] != 0:
-                        self.console.print(f"[red]Command failed with return code {result['returncode']}[/red]")
-                    
-                    # Display output regardless of return code
-                    if result["stdout"]:
-                        self.console.print(result["stdout"])
-                    if result["stderr"]:
-                        self.console.print(f"[red]{result['stderr']}[/red]")
-                except Exception as e:
-                    self.console.print(f"[red]Error: {str(e)}[/red]")
+                for attempt in range(1, max_tries + 1):
+                    try:
+                        if max_tries > 1:
+                            self.console.print(f"\n[cyan]Running: {command} (Attempt {attempt}/{max_tries})[/cyan]")
+                        else:
+                            self.console.print(f"\n[cyan]Running: {command}[/cyan]")
+                            
+                        # Use shell=True to handle complex commands with pipes, redirects, etc.
+                        result = run_tool(command, shell=True, timeout=300)
+                        
+                        # For vsftpd exploit, check for success markers
+                        if is_vsftpd_exploit:
+                            if "Success, shell opened" in result["stdout"]:
+                                self.console.print("[green]Exploit successfully executed![/green]")
+                                break
+                            elif "Connection refused" in result["stderr"] or "Connection refused" in result["stdout"]:
+                                if attempt < max_tries:
+                                    self.console.print(f"[yellow]Connection refused (Attempt {attempt}/{max_tries}). The backdoor might need time to activate. Retrying in 5 seconds...[/yellow]")
+                                    time.sleep(5)  # Wait 5 seconds before retrying
+                                else:
+                                    self.console.print("[red]All attempts failed. The target may not be vulnerable.[/red]")
+                        
+                        if result["returncode"] != 0 and not is_vsftpd_exploit:
+                            self.console.print(f"[red]Command failed with return code {result['returncode']}[/red]")
+                        
+                        # Display output regardless of return code
+                        if result["stdout"]:
+                            self.console.print(result["stdout"])
+                        if result["stderr"]:
+                            self.console.print(f"[red]{result['stderr']}[/red]")
+                            
+                        # If not a special case and command succeeded, or we've reached max attempts, break the loop
+                        if not is_vsftpd_exploit or attempt >= max_tries:
+                            break
+                            
+                    except Exception as e:
+                        self.console.print(f"[red]Error: {str(e)}[/red]")
+                        if attempt < max_tries and is_vsftpd_exploit:
+                            self.console.print(f"[yellow]Retrying in 5 seconds (Attempt {attempt}/{max_tries})...[/yellow]")
+                            time.sleep(5)
+                        else:
+                            break
+                
+                # If it's the vsftpd exploit, provide guidance for manual attempt
+                if is_vsftpd_exploit:
+                    self.console.print("\n[bold yellow]Tips for vsftpd 2.3.4 exploit:[/bold yellow]")
+                    self.console.print("1. The exploit sometimes fails on the first attempt but works on second try")
+                    self.console.print("2. Try running the command manually from your terminal:")
+                    self.console.print(f"   {command}")
+                    self.console.print("3. If still failing, verify the FTP service is running with: nc -v " + target + " 21")
         
         # If no recognized exploit type, try to display file content
         elif exploit_type == "unknown" and "local_path" in exploit_info:
