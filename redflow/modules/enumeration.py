@@ -14,6 +14,7 @@ import ftplib
 import requests
 import subprocess
 import shutil
+import socket
 
 from redflow.utils.logger import get_module_logger
 from redflow.utils.helpers import run_tool
@@ -1199,6 +1200,56 @@ class Enumeration:
             self.console.print(f"[red]{error_msg}[/red]")
             return error_msg 
 
+    def _check_server_connectivity(self, host, port, protocol="http", timeout=3):
+        """
+        Check if a server is accessible before attempting downloads
+        
+        Args:
+            host (str): Host to check
+            port (int or str): Port number
+            protocol (str): Protocol (http or https)
+            timeout (int): Connection timeout in seconds
+            
+        Returns:
+            bool: True if server is accessible, False otherwise
+        """
+        import socket
+        import requests
+        from requests.packages.urllib3.exceptions import InsecureRequestWarning
+        requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+        
+        self.logger.info(f"Checking connectivity to {host}:{port} using {protocol}...")
+        
+        # First try a simple socket connection to check if the port is open
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, int(port)))
+            sock.close()
+            
+            if result != 0:
+                self.logger.warning(f"Port {port} appears to be closed on {host}")
+                self.console.print(f"[yellow]Warning: Port {port} appears to be closed on {host}[/yellow]")
+                self.console.print("[yellow]Network connection might be unavailable or port is not open[/yellow]")
+                return False
+        except Exception as e:
+            self.logger.warning(f"Socket connection error to {host}:{port}: {str(e)}")
+            self.console.print(f"[yellow]Warning: Cannot connect to {host}:{port}: {str(e)}[/yellow]")
+            return False
+        
+        # If socket connection succeeded, try HTTP(S) request
+        try:
+            url = f"{protocol}://{host}:{port}/"
+            response = requests.head(url, timeout=timeout, verify=False)
+            self.logger.info(f"HTTP connection to {url} succeeded with status code: {response.status_code}")
+            return True
+        except requests.RequestException as e:
+            self.logger.warning(f"HTTP connection error to {url}: {str(e)}")
+            self.console.print(f"[yellow]Warning: HTTP connection to {url} failed: {str(e)}[/yellow]")
+            # If socket connected but HTTP failed, the port might be used by a different service
+            self.console.print("[yellow]Port is open but might not be running an HTTP server[/yellow]")
+            return False
+
     def interactive_download_files(self, target=None, port=80, protocol="http"):
         """
         Interactive file download - allows user to select which discovered files to download
@@ -1228,6 +1279,30 @@ class Enumeration:
             self.console.print(f"[bold red]Missing dependency: {missing_package}[/bold red]")
             self.console.print(f"[yellow]Please install it with: pip install {missing_package}[/yellow]")
             return downloaded_files
+        
+        # First check if the server is accessible
+        if not self._check_server_connectivity(target, port_str, protocol):
+            self.console.print(f"[bold red]Cannot connect to {protocol}://{target}:{port_str}[/bold red]")
+            
+            # Ask user if they want to continue anyway or change target
+            self.console.print("\n[yellow]Options:[/yellow]")
+            self.console.print("1. Continue anyway (files might fail to download)")
+            self.console.print("2. Change target IP/hostname")
+            self.console.print("3. Abort download operation")
+            
+            choice = input("Enter your choice (1-3): ").strip()
+            
+            if choice == "2":
+                new_target = input("Enter new target IP/hostname: ").strip()
+                if new_target:
+                    # Retry with new target
+                    self.console.print(f"[green]Retrying with new target: {new_target}[/green]")
+                    return self.interactive_download_files(new_target, port_str, protocol)
+            elif choice == "3":
+                self.console.print("[yellow]Download operation aborted[/yellow]")
+                return downloaded_files
+            # For choice 1 or invalid choice, continue anyway
+            self.console.print("[yellow]Continuing with download attempts...[/yellow]")
         
         # Get the web service results for the specified port
         web_files = []
@@ -1392,18 +1467,18 @@ class Enumeration:
             return downloaded_files
         
         # Display discovered files and directories for selection
-        self.console.print(f"\n[bold cyan]קבצים שהתגלו ב-{protocol}://{target}:{port_str}[/bold cyan]")
+        self.console.print(f"\n[bold cyan]Files discovered on {protocol}://{target}:{port_str}[/bold cyan]")
         
         all_paths = []
         
         if web_files:
-            self.console.print(f"\n[bold green]קבצים ({len(web_files)}):[/bold green]")
+            self.console.print(f"\n[bold green]Files ({len(web_files)}):[/bold green]")
             for i, file in enumerate(web_files, 1):
                 self.console.print(f"  {i}. {file}")
                 all_paths.append({"type": "file", "path": file})
         
         if web_dirs:
-            self.console.print(f"\n[bold green]תיקיות ({len(web_dirs)}):[/bold green]")
+            self.console.print(f"\n[bold green]Directories ({len(web_dirs)}):[/bold green]")
             for i, directory in enumerate(web_dirs, len(web_files) + 1):
                 self.console.print(f"  {i}. {directory}")
                 all_paths.append({"type": "directory", "path": directory})
@@ -1457,25 +1532,25 @@ class Enumeration:
                                     break
                             
                             # Call this function again to display the updated list
-                            self.console.print(f"[green]נמצאו {len(new_files)} קבצים חדשים ו-{len(new_dirs)} תיקיות חדשות![/green]")
-                            self.console.print("[yellow]הצגת רשימה מעודכנת של קבצים ותיקיות...[/yellow]")
+                            self.console.print(f"[green]Found {len(new_files)} new files and {len(new_dirs)} new directories![/green]")
+                            self.console.print("[yellow]Displaying updated list of files and directories...[/yellow]")
                             return self.interactive_download_files(target, port_str, protocol)
                         else:
-                            self.console.print("[yellow]לא נמצאו קבצים או תיקיות נוספים[/yellow]")
+                            self.console.print("[yellow]No additional files or directories found[/yellow]")
                             # Continue with the current list
                             return self.interactive_download_files(target, port_str, protocol)
                     else:
-                        self.console.print("[red]מספר תיקייה לא חוקי. אנא בחר מספר תיקייה מהרשימה.[/red]")
+                        self.console.print("[red]Invalid directory number. Please choose a directory from the list.[/red]")
                         return self.interactive_download_files(target, port_str, protocol)
                 except ValueError:
-                    self.console.print("[red]פורמט לא חוקי. השתמש ב-'scan X' כאשר X הוא מספר התיקייה.[/red]")
+                    self.console.print("[red]Invalid format. Use 'scan X' where X is the directory number.[/red]")
                     return self.interactive_download_files(target, port_str, protocol)
             else:
                 # Parse user selection
                 try:
                     indices = [int(idx.strip()) for idx in selection.split(",") if idx.strip()]
                 except ValueError:
-                    self.console.print("[red]קלט לא חוקי. אנא הזן מספרים מופרדים בפסיקים.[/red]")
+                    self.console.print("[red]Invalid input. Please enter numbers separated by commas.[/red]")
                     return downloaded_files
             
             # Download selected files
@@ -1483,10 +1558,11 @@ class Enumeration:
             target_dir = os.path.join(self.config.output_dir, "downloads", f"{protocol}_{port_str}")
             os.makedirs(target_dir, exist_ok=True)
             
-            self.console.print(f"[cyan]הקבצים יורדו אל: {target_dir}[/cyan]")
+            self.console.print(f"[cyan]Files will be downloaded to: {target_dir}[/cyan]")
             
             total_success = 0
             total_failed = 0
+            max_retry_count = 2  # Maximum number of retries for failures
             
             for idx in indices:
                 if 1 <= idx <= len(all_paths):
@@ -1497,70 +1573,31 @@ class Enumeration:
                     # Create the full URL
                     url = f"{base_url}{path}"
                     
-                    if item_type == "file":
-                        self.console.print(f"[bold]Downloading file: [blue]{path}[/blue]...[/bold]")
-                        
-                        try:
-                            # Directly use requests for download to handle dependency issues
-                            local_filename = os.path.join(target_dir, os.path.basename(path))
+                    # For retrying with modified parameters
+                    retry_count = 0
+                    
+                    while retry_count <= max_retry_count:
+                        if item_type == "file":
+                            self.console.print(f"[bold]Downloading file: [blue]{path}[/blue]...[/bold]")
                             
-                            # Ensure we have a filename
-                            if not os.path.basename(path):
-                                local_filename = os.path.join(target_dir, "index.html")
-                            
-                            # Download the file
-                            import requests
-                            response = requests.get(url, verify=False)
-                            if response.status_code == 200:
-                                with open(local_filename, 'wb') as f:
-                                    f.write(response.content)
+                            try:
+                                # Directly use requests for download to handle dependency issues
+                                local_filename = os.path.join(target_dir, os.path.basename(path))
                                 
-                                downloaded_files.append(local_filename)
-                                self.console.print(f"[green]Downloaded to:[/green] {local_filename}")
-                                total_success += 1
+                                # Ensure we have a filename
+                                if not os.path.basename(path):
+                                    local_filename = os.path.join(target_dir, "index.html")
                                 
-                                # Store in results
-                                for web_result in self.results["web"]:
-                                    if str(web_result.get("port", "")) == port_str and web_result.get("protocol", "") == protocol:
-                                        if "downloaded_files" not in web_result:
-                                            web_result["downloaded_files"] = []
-                                        
-                                        web_result["downloaded_files"].append({
-                                            "url": url,
-                                            "local_path": local_filename
-                                        })
-                                        break
-                        except Exception as e:
-                            self.console.print(f"[red]Failed to download {path}: {str(e)}[/red]")
-                            total_failed += 1
-                    else:  # directory
-                        self.console.print(f"[bold]Checking directory: [blue]{path}[/blue]...[/bold]")
-                        
-                        try:
-                            # Try to download index files from directory
-                            index_files = ["index.html", "index.php", "default.asp", "index.jsp", "default.html"]
-                            dir_success = False
-                            
-                            for index in index_files:
-                                index_url = f"{base_url}{path}/{index}"
-                                self.console.print(f"[cyan]Trying: {index_url}[/cyan]")
+                                # Download the file with timeout
+                                import requests
+                                response = requests.get(url, verify=False, timeout=10, allow_redirects=True)
                                 
-                                # Check if file exists
-                                response = requests.head(index_url, verify=False, timeout=5)
                                 if response.status_code == 200:
-                                    # Download the file
-                                    dir_path = os.path.join(target_dir, os.path.basename(path.rstrip('/')))
-                                    os.makedirs(dir_path, exist_ok=True)
-                                    
-                                    local_filename = os.path.join(dir_path, index)
-                                    response = requests.get(index_url, verify=False)
-                                    
                                     with open(local_filename, 'wb') as f:
                                         f.write(response.content)
                                     
                                     downloaded_files.append(local_filename)
-                                    self.console.print(f"[green]Downloaded directory index to:[/green] {local_filename}")
-                                    dir_success = True
+                                    self.console.print(f"[green]Downloaded to:[/green] {local_filename}")
                                     total_success += 1
                                     
                                     # Store in results
@@ -1570,17 +1607,114 @@ class Enumeration:
                                                 web_result["downloaded_files"] = []
                                             
                                             web_result["downloaded_files"].append({
-                                                "url": index_url,
+                                                "url": url,
                                                 "local_path": local_filename
                                             })
                                             break
-                                            
-                            if not dir_success:
-                                self.console.print("[yellow]No index files found in directory. Try manually browsing to the directory.[/yellow]")
-                                total_failed += 1
-                        except Exception as e:
-                            self.console.print(f"[red]Failed to check directory {path}: {str(e)}[/red]")
-                            total_failed += 1
+                                    
+                                    # Success, break retry loop
+                                    break
+                                else:
+                                    self.console.print(f"[yellow]Server returned status code {response.status_code} for {path}[/yellow]")
+                                    retry_count += 1
+                                    
+                                    if retry_count <= max_retry_count:
+                                        self.console.print(f"[yellow]Retrying... (Attempt {retry_count}/{max_retry_count})[/yellow]")
+                                    else:
+                                        self.console.print(f"[red]Failed to download {path} after {max_retry_count} attempts[/red]")
+                                        total_failed += 1
+                            except Exception as e:
+                                self.console.print(f"[red]Failed to download {path}: {str(e)}[/red]")
+                                retry_count += 1
+                                
+                                if retry_count <= max_retry_count:
+                                    self.console.print(f"[yellow]Retrying... (Attempt {retry_count}/{max_retry_count})[/yellow]")
+                                else:
+                                    total_failed += 1
+                        else:  # directory
+                            self.console.print(f"[bold]Checking directory: [blue]{path}[/blue]...[/bold]")
+                            
+                            try:
+                                # Try to download index files from directory
+                                index_files = ["index.html", "index.php", "default.asp", "index.jsp", "default.html"]
+                                dir_success = False
+                                
+                                for index in index_files:
+                                    index_url = f"{base_url}{path}/{index}"
+                                    self.console.print(f"[cyan]Trying: {index_url}[/cyan]")
+                                    
+                                    # Check if file exists with longer timeout
+                                    response = requests.head(index_url, verify=False, timeout=10)
+                                    if response.status_code == 200:
+                                        # Download the file
+                                        dir_path = os.path.join(target_dir, os.path.basename(path.rstrip('/')))
+                                        os.makedirs(dir_path, exist_ok=True)
+                                        
+                                        local_filename = os.path.join(dir_path, index)
+                                        response = requests.get(index_url, verify=False, timeout=10)
+                                        
+                                        with open(local_filename, 'wb') as f:
+                                            f.write(response.content)
+                                        
+                                        downloaded_files.append(local_filename)
+                                        self.console.print(f"[green]Downloaded directory index to:[/green] {local_filename}")
+                                        dir_success = True
+                                        total_success += 1
+                                        
+                                        # Store in results
+                                        for web_result in self.results["web"]:
+                                            if str(web_result.get("port", "")) == port_str and web_result.get("protocol", "") == protocol:
+                                                if "downloaded_files" not in web_result:
+                                                    web_result["downloaded_files"] = []
+                                                
+                                                web_result["downloaded_files"].append({
+                                                    "url": index_url,
+                                                    "local_path": local_filename
+                                                })
+                                                break
+                                        
+                                        # Found and downloaded one index, break loop
+                                        break
+                                
+                                if dir_success:
+                                    # Successfully downloaded directory index, break retry loop
+                                    break
+                                else:
+                                    self.console.print("[yellow]No index files found in directory. Try manually browsing to the directory.[/yellow]")
+                                    retry_count += 1
+                                    
+                                    if retry_count <= max_retry_count:
+                                        self.console.print(f"[yellow]Retrying with different approach... (Attempt {retry_count}/{max_retry_count})[/yellow]")
+                                        # On retry, try to download directory listing directly
+                                        if retry_count == max_retry_count:
+                                            dir_url = f"{base_url}{path}"
+                                            try:
+                                                dir_path = os.path.join(target_dir, os.path.basename(path.rstrip('/')))
+                                                os.makedirs(dir_path, exist_ok=True)
+                                                
+                                                local_filename = os.path.join(dir_path, "directory.html")
+                                                response = requests.get(dir_url, verify=False, timeout=10)
+                                                
+                                                if response.status_code == 200:
+                                                    with open(local_filename, 'wb') as f:
+                                                        f.write(response.content)
+                                                    
+                                                    downloaded_files.append(local_filename)
+                                                    self.console.print(f"[green]Downloaded directory listing to:[/green] {local_filename}")
+                                                    dir_success = True
+                                                    total_success += 1
+                                            except Exception as e:
+                                                self.console.print(f"[red]Failed to download directory listing: {str(e)}[/red]")
+                                    else:
+                                        total_failed += 1
+                            except Exception as e:
+                                self.console.print(f"[red]Failed to check directory {path}: {str(e)}[/red]")
+                                retry_count += 1
+                                
+                                if retry_count <= max_retry_count:
+                                    self.console.print(f"[yellow]Retrying... (Attempt {retry_count}/{max_retry_count})[/yellow]")
+                                else:
+                                    total_failed += 1
                 else:
                     self.console.print(f"[red]Invalid selection: {idx}[/red]")
             
@@ -1614,11 +1748,19 @@ class Enumeration:
             
             if total_failed > 0:
                 self.console.print(f"[yellow]Failed to download {total_failed} item(s)[/yellow]")
+                
+                # Suggest alternatives
+                self.console.print("\n[bold cyan]Troubleshooting:[/bold cyan]")
+                self.console.print("1. Check if the target is accessible and the service is running")
+                self.console.print("2. Try accessing the files directly in a browser")
+                self.console.print("3. Verify you have the correct IP address and port")
+                self.console.print("4. If you're targeting localhost, make sure the web server is running")
+                self.console.print(f"5. Try running: curl -v {protocol}://{target}:{port_str} to test connectivity")
             
             return downloaded_files
         except KeyboardInterrupt:
             self.console.print("\n[yellow]Download operation cancelled by user[/yellow]")
-            return downloaded_files 
+            return downloaded_files
 
     def scan_directory_recursively(self, target, port, protocol, directory_path):
         """

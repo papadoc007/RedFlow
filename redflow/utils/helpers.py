@@ -13,6 +13,8 @@ import subprocess
 from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
+import importlib
+import errno
 
 
 def is_valid_ip(ip):
@@ -86,6 +88,43 @@ def init_project_dir(target, base_output_dir="./scans/"):
     return project_dir
 
 
+def is_tool_available(name):
+    """
+    Check if a specific tool is available in the system path
+    // בדיקה האם כלי ספציפי זמין בנתיב המערכת
+    
+    Args:
+        name: Tool name to check
+        
+    Returns:
+        True if tool is available
+    """
+    try:
+        devnull = subprocess.DEVNULL
+        subprocess.Popen([name, "--help"], stdout=devnull, stderr=devnull).communicate()
+    except OSError as e:
+        if e.errno == errno.ENOENT:
+            return False
+    return True
+
+
+def is_python_package_installed(package_name):
+    """
+    Check if a specific Python package is installed
+    
+    Args:
+        package_name: Package name to check
+        
+    Returns:
+        True if package is installed
+    """
+    try:
+        importlib.import_module(package_name)
+        return True
+    except ImportError:
+        return False
+
+
 def check_requirements(logger):
     """
     Check system requirements and required tools
@@ -101,12 +140,21 @@ def check_requirements(logger):
     essential_tools = ["nmap", "whois", "dig"]
     optional_tools = ["enum4linux", "hydra", "gobuster", "theHarvester", "sublist3r", "whatweb", "wafw00f"]
     
+    # Python packages
+    essential_packages = ["requests"]
+    optional_packages = ["ftputil"]
+    
     missing_tools = []
     
     # Check essential tools
     for tool in essential_tools:
         if not is_tool_available(tool):
             missing_tools.append(tool)
+    
+    # Check essential Python packages
+    for package in essential_packages:
+        if not is_python_package_installed(package):
+            missing_tools.append(f"Python package: {package}")
     
     if missing_tools:
         logger.error(f"Missing essential tools: {', '.join(missing_tools)}")
@@ -125,31 +173,25 @@ def check_requirements(logger):
         if not is_tool_available(tool):
             optional_missing.append(tool)
     
+    # Check optional Python packages
+    for package in optional_packages:
+        if not is_python_package_installed(package):
+            optional_missing.append(f"Python package: {package}")
+    
     if optional_missing:
-        logger.warning(f"Missing optional tools: {', '.join(optional_missing)}")
-        logger.warning("Some features may not work without these tools")
+        logger.warning(f"Missing optional tools/packages: {', '.join(optional_missing)}")
+        logger.warning("Some features may not work without these tools/packages")
         console = Console()
         console.print(Panel.fit(
-            f"[bold yellow]Missing optional tools:[/bold yellow] {', '.join(optional_missing)}\n"
-            f"Some features may not work without these tools", 
+            f"[bold yellow]Missing optional tools/packages:[/bold yellow] {', '.join(optional_missing)}\n"
+            f"Some features may not work without these tools/packages\n\n"
+            f"To install missing Python packages, run:\n"
+            f"[green]pip install {' '.join([p.replace('Python package: ', '') for p in optional_missing if p.startswith('Python package:')])}"
+            if any(p.startswith('Python package:') for p in optional_missing) else "",
             title="Warning"
         ))
     
     return True
-
-
-def is_tool_available(tool_name):
-    """
-    Check if a specific tool is available in the system
-    // בדיקה האם כלי מסוים זמין במערכת
-    
-    Args:
-        tool_name: Name of the tool to check
-        
-    Returns:
-        Boolean: Whether the tool is available
-    """
-    return shutil.which(tool_name) is not None
 
 
 def get_target_info(target):
