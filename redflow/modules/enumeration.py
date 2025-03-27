@@ -2841,3 +2841,53 @@ class Enumeration:
                 # Fallback to showing the command
                 self.console.print("[yellow]Command failed. Try running msfconsole manually:[/yellow]")
                 self.console.print("msfconsole")
+
+    def interactive_exploit_menu(self, service_name, product_name, version, target):
+        """
+        תפריט אינטראקטיבי לניצול פגיעויות
+        
+        Args:
+            service_name: שם השירות
+            product_name: שם המוצר
+            version: גרסת המוצר
+            target: כתובת המטרה
+        """
+        self.logger.info(f"מפעיל תפריט ניצול עבור {service_name} {version}")
+        
+        # בדיקה אם המטרה היא localhost ובקשת כתובת IP תקפה
+        target = self.get_target_ip(target)
+        if not target:
+            return
+        
+        # חיפוש פגיעויות באמצעות searchsploit
+        vulnerabilities = self.find_vulnerabilities_with_searchsploit(product_name, version)
+        
+        if not vulnerabilities:
+            self.console.print("[yellow]לא נמצאו פגיעויות ידועות. האם תרצה לנסות חיפוש מותאם אישית?[/yellow] (y/n)")
+            response = input("> ").strip().lower()
+            
+            if response in ["y", "yes", ""]:
+                self.console.print("[cyan]הזן מונח חיפוש (למשל: vsftpd):[/cyan]")
+                search_term = input("> ").strip()
+                vulnerabilities = self.find_vulnerabilities_with_searchsploit(search_term)
+        
+        if vulnerabilities:
+            self.console.print("\n[bold blue]פגיעויות שנמצאו:[/bold blue]")
+            for i, vuln in enumerate(vulnerabilities, 1):
+                self.console.print(f"{i}. {vuln['title']} ({vuln['path']})")
+            
+            self.console.print("\n[cyan]בחר מספר פגיעות לניצול (או 'q' ליציאה):[/cyan]")
+            choice = input("> ").strip()
+            
+            if choice.lower() != 'q':
+                try:
+                    index = int(choice) - 1
+                    if 0 <= index < len(vulnerabilities):
+                        selected_vuln = vulnerabilities[index]
+                        self.display_exploit_instructions(selected_vuln, target)
+                    else:
+                        self.console.print("[red]בחירה לא תקפה[/red]")
+                except ValueError:
+                    self.console.print("[red]בחירה לא תקפה[/red]")
+        else:
+            self.console.print("[yellow]לא נמצאו פגיעויות[/yellow]")
