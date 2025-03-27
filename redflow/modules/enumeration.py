@@ -2024,25 +2024,6 @@ class Enumeration:
             # Check if the file exists
             if os.path.exists(exploitdb_path):
                 self.logger.info(f"Found exploit at: {exploitdb_path}")
-                
-                # Determine exploit type based on extension
-                extension = os.path.splitext(exploitdb_path)[1].lower()
-                exploit_type = "unknown"
-                
-                if extension == ".py":
-                    exploit_type = "python"
-                elif extension == ".rb":
-                    exploit_type = "metasploit"
-                elif extension == ".c":
-                    exploit_type = "c"
-                elif extension == ".php":
-                    exploit_type = "php"
-                elif extension == ".sh":
-                    exploit_type = "shell"
-                elif extension == ".pl" or extension == ".pm":
-                    exploit_type = "perl"
-                
-                # Return the local path to the exploit
                 return exploitdb_path
             else:
                 # Try searchsploit to get the path
@@ -2177,10 +2158,10 @@ class Enumeration:
         Display detailed instructions on how to use the selected exploit and offer to run it
         
         Args:
-            exploit_info: Dictionary with exploit information
+            exploit_info: Dictionary with exploit information or string path to exploit
             target: Target IP address
         """
-        # Check if exploit_info is a dictionary or a string
+        # Check if exploit_info is valid
         if not exploit_info:
             self.console.print("[red]No exploit information available[/red]")
             return
@@ -2194,8 +2175,11 @@ class Enumeration:
         
         self.console.print("\n[bold blue]Exploit Information:[/bold blue]")
         
-        # Display exploit information
-        if isinstance(exploit_info, dict):
+        # Convert string local path to local_path variable
+        local_path = None
+        if isinstance(exploit_info, str):
+            local_path = exploit_info
+        elif isinstance(exploit_info, dict):
             title = exploit_info.get('title', 'Unknown Title')
             path = exploit_info.get('path', 'Path not available')
             exploit_type = exploit_info.get('type', 'Unknown')
@@ -2212,92 +2196,160 @@ class Enumeration:
             
             # Try to get the local path of the exploit
             local_path = self.prepare_exploit(path, target)
-            if local_path:
-                self.console.print(f"Local file: [green]{local_path}[/green]")
+        
+        if local_path:
+            self.console.print(f"Local file: [green]{local_path}[/green]")
+            
+            # Check if this is a Metasploit module
+            if "msf" in local_path.lower() or local_path.endswith(".rb"):
+                self.console.print("\n[bold green]This is a Metasploit module. Here's how to use it:[/bold green]")
                 
-                # Check if this is a Metasploit module
-                if "msf" in path.lower() or path.endswith(".rb"):
-                    self.console.print("\n[bold green]This is a Metasploit module. Here's how to use it:[/bold green]")
+                # Extract Metasploit path
+                msf_path = self._extract_metasploit_path(local_path)
+                if msf_path:
+                    self.console.print(f"\n[bold]Run the following commands in msfconsole:[/bold]")
+                    self.console.print(f"msfconsole")
+                    self.console.print(f"use {msf_path}")
+                    self.console.print(f"set RHOSTS {target}")
+                    self.console.print(f"show options")
+                    self.console.print(f"exploit")
                     
-                    # Extract Metasploit path
-                    msf_path = self._extract_metasploit_path(path)
-                    if msf_path:
-                        self.console.print(f"\n[bold]Run the following commands in msfconsole:[/bold]")
-                        self.console.print(f"msfconsole")
-                        self.console.print(f"use {msf_path}")
-                        self.console.print(f"set RHOSTS {target}")
-                        self.console.print(f"show options")
-                        self.console.print(f"exploit")
-                        
-                        # Ask if user wants to run metasploit directly
-                        self.console.print("\n[yellow]Would you like to launch Metasploit and run this exploit now? (y/n)[/yellow]")
-                        response = input("> ").strip().lower()
-                        
-                        if response in ["y", "yes", ""]:
-                            # Try to run the exploit with msfconsole
-                            self.console.print("[cyan]Launching Metasploit...[/cyan]")
-                            try:
-                                cmd = f"msfconsole -q -x 'use {msf_path}; set RHOSTS {target}; show options; exploit'"
-                                self.console.print(f"[green]Running: {cmd}[/green]")
-                                subprocess.run(cmd, shell=True)
-                            except Exception as e:
-                                self.console.print(f"[red]Error running Metasploit: {str(e)}[/red]")
-                                self.console.print("[yellow]You can run it manually using the commands shown above.[/yellow]")
-                    else:
-                        # Try to extract from file content
-                        try:
-                            with open(local_path, 'r', errors='ignore') as f:
-                                content = f.read()
-                                msf_module_match = re.search(r"['\"]Name['\"].*?['\"]([^'\"]+)['\"]", content)
-                                if msf_module_match:
-                                    module_name = msf_module_match.group(1)
-                                    self.console.print(f"[green]Found module name: {module_name}[/green]")
-                                    self.console.print(f"\n[bold]Try these commands in msfconsole:[/bold]")
-                                    self.console.print(f"msfconsole")
-                                    self.console.print(f"search {module_name}")
-                                    self.console.print(f"use <matching_module>")
-                                    self.console.print(f"set RHOSTS {target}")
-                                    self.console.print(f"show options")
-                                    self.console.print(f"exploit")
-                                else:
-                                    self.console.print("[yellow]Could not determine Metasploit module path from the exploit content.[/yellow]")
-                                    self.console.print("[yellow]Try searching for the module in msfconsole:[/yellow]")
-                                    self.console.print(f"msfconsole")
-                                    self.console.print(f"search {os.path.basename(path)}")
-                        except Exception as e:
-                            self.console.print("[yellow]Could not determine Metasploit module path.[/yellow]")
-                            self.console.print("[yellow]Try running msfconsole and search for the module manually.[/yellow]")
-                
-                # Python exploit
-                elif path.endswith(".py"):
-                    self.console.print("\n[bold green]This is a Python exploit. Here's how to use it:[/bold green]")
-                    self.console.print(f"python {local_path} {target}")
-                    
-                    # Ask if the user wants to run the exploit now
-                    self.console.print("\n[yellow]Would you like to run this exploit now? (y/n)[/yellow]")
+                    # Ask if user wants to run metasploit directly
+                    self.console.print("\n[yellow]Would you like to launch Metasploit and run this exploit now? (y/n)[/yellow]")
                     response = input("> ").strip().lower()
                     
                     if response in ["y", "yes", ""]:
-                        # Check if the exploit needs to be modified
-                        self.console.print("[cyan]Checking if the exploit needs to be modified...[/cyan]")
+                        # Try to run the exploit with msfconsole
+                        self.console.print("[cyan]Launching Metasploit...[/cyan]")
                         try:
-                            with open(local_path, 'r') as f:
-                                content = f.read()
-                                
-                            # Look for RHOST, lhost, or similar variables
-                            if "RHOST" in content or "rhost" in content or "target" in content:
-                                self.console.print("[yellow]This exploit may need to be modified with the target IP.[/yellow]")
-                                self.console.print("[yellow]Opening the file for review before running.[/yellow]")
-                                self.console.print(f"[green]Please review {local_path} and modify if needed.[/green]")
-                                
-                                # Give the user a chance to review/modify
-                                self.console.print("[yellow]Press Enter when ready to run the exploit, or 'q' to cancel[/yellow]")
-                                response = input("> ").strip().lower()
-                                if response == 'q':
-                                    return
+                            cmd = f"msfconsole -q -x 'use {msf_path}; set RHOSTS {target}; show options; exploit'"
+                            self.console.print(f"[green]Running: {cmd}[/green]")
+                            subprocess.run(cmd, shell=True)
+                        except Exception as e:
+                            self.console.print(f"[red]Error running Metasploit: {str(e)}[/red]")
+                            self.console.print("[yellow]You can run it manually using the commands shown above.[/yellow]")
+                else:
+                    # Try to extract from file content
+                    try:
+                        with open(local_path, 'r', errors='ignore') as f:
+                            content = f.read()
+                            msf_module_match = re.search(r"['\"]Name['\"].*?['\"]([^'\"]+)['\"]", content)
+                            if msf_module_match:
+                                module_name = msf_module_match.group(1)
+                                self.console.print(f"[green]Found module name: {module_name}[/green]")
+                                self.console.print(f"\n[bold]Try these commands in msfconsole:[/bold]")
+                                self.console.print(f"msfconsole")
+                                self.console.print(f"search {module_name}")
+                                self.console.print(f"use <matching_module>")
+                                self.console.print(f"set RHOSTS {target}")
+                                self.console.print(f"show options")
+                                self.console.print(f"exploit")
+                            else:
+                                self.console.print("[yellow]Could not determine Metasploit module path from the exploit content.[/yellow]")
+                                self.console.print("[yellow]Try searching for the module in msfconsole:[/yellow]")
+                                self.console.print(f"msfconsole")
+                                self.console.print(f"search {os.path.basename(local_path)}")
+                    except Exception as e:
+                        self.console.print("[yellow]Could not determine Metasploit module path.[/yellow]")
+                        self.console.print("[yellow]Try running msfconsole and search for the module manually.[/yellow]")
+            
+            # Python exploit
+            elif local_path.endswith(".py"):
+                self.console.print("\n[bold green]This is a Python exploit. Here's how to use it:[/bold green]")
+                self.console.print(f"python {local_path} {target}")
+                
+                # Ask if the user wants to run the exploit now
+                self.console.print("\n[yellow]Would you like to run this exploit now? (y/n)[/yellow]")
+                response = input("> ").strip().lower()
+                
+                if response in ["y", "yes", ""]:
+                    # Check if the exploit needs to be modified
+                    self.console.print("[cyan]Checking if the exploit needs to be modified...[/cyan]")
+                    
+                    # Special handling for vsftpd 2.3.4 exploit
+                    is_vsftpd = "vsftpd" in local_path.lower() and "2.3.4" in local_path
+                    use_interactive = is_vsftpd
+                    
+                    try:
+                        # Run the exploit with appropriate method
+                        if use_interactive:
+                            # For vsftpd, use interactive mode to allow command passing
+                            cmd = ["python", local_path, target]
+                            self.console.print(f"[cyan]Running: {' '.join(cmd)}[/cyan]")
                             
-                            # Run the exploit
-                            self.console.print(f"[cyan]Running: python {local_path} {target}[/cyan]")
+                            # Start the process and enable interaction
+                            process = subprocess.Popen(
+                                cmd,
+                                stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                bufsize=1,
+                                universal_newlines=True
+                            )
+                            
+                            # Create a real-time two-way interaction for the exploit
+                            import threading
+                            import sys
+                            import time
+                            
+                            # Thread to capture and display output
+                            def capture_output():
+                                while True:
+                                    line = process.stdout.readline()
+                                    if not line and process.poll() is not None:
+                                        break
+                                    if line:
+                                        sys.stdout.write(line)
+                                
+                                # Check for errors after the process ends
+                                stderr = process.stderr.read()
+                                if stderr and "Connection refused" in stderr:
+                                    self.console.print("\n[red]Connection refused. The exploit might need another attempt.[/red]")
+                                elif stderr:
+                                    self.console.print(f"\n[red]Errors:\n{stderr}[/red]")
+                            
+                            # Start output thread
+                            output_thread = threading.Thread(target=capture_output)
+                            output_thread.daemon = True
+                            output_thread.start()
+                            
+                            # For vsftpd, try multiple times if not successful
+                            if is_vsftpd:
+                                # Give it time to connect
+                                time.sleep(2)
+                                
+                                # Try an initial command
+                                self.console.print("[yellow]Testing if shell is working with 'ls' command...[/yellow]")
+                                if process.poll() is None:  # Check if process is still running
+                                    process.stdin.write("ls\n")
+                                    process.stdin.flush()
+                                    time.sleep(1)
+                                
+                                # Wait for user input until they exit
+                                while True:
+                                    if process.poll() is not None:  # Process has ended
+                                        break
+                                    
+                                    try:
+                                        user_cmd = input()
+                                        if user_cmd.lower() in ['exit', 'quit']:
+                                            process.terminate()
+                                            break
+                                        process.stdin.write(f"{user_cmd}\n")
+                                        process.stdin.flush()
+                                    except (EOFError, KeyboardInterrupt):
+                                        process.terminate()
+                                        break
+                            
+                            # Wait for process to complete or user to interrupt
+                            try:
+                                process.wait()
+                            except KeyboardInterrupt:
+                                process.terminate()
+                                self.console.print("\n[yellow]Exploit terminated by user[/yellow]")
+                        else:
+                            # Regular non-interactive exploit
                             result = subprocess.run(["python", local_path, target], capture_output=True, text=True)
                             
                             # Display the output
@@ -2310,95 +2362,88 @@ class Enumeration:
                                 self.console.print(result.stderr)
                                 
                             # For vsftpd 2.3.4 specific case - it often requires a second connection attempt
-                            if "vsftpd 2.3.4" in title and "Connection refused" in result.stderr:
+                            if "vsftpd 2.3.4" in local_path and "Connection refused" in result.stderr:
                                 self.console.print("[yellow]The vsftpd backdoor sometimes requires multiple attempts.[/yellow]")
                                 self.console.print("[yellow]Would you like to try running it again? (y/n)[/yellow]")
                                 retry = input("> ").strip().lower()
                                 if retry in ["y", "yes", ""]:
                                     self.console.print(f"[cyan]Retrying: python {local_path} {target}[/cyan]")
-                                    result = subprocess.run(["python", local_path, target], capture_output=True, text=True)
+                                    subprocess.run(["python", local_path, target])
                                     
-                                    # Display the output of the retry
-                                    if result.stdout:
-                                        self.console.print("\n[bold]Exploit output (retry):[/bold]")
-                                        self.console.print(result.stdout)
-                                    
-                                    if result.stderr:
-                                        self.console.print("\n[bold red]Errors (retry):[/bold red]")
-                                        self.console.print(result.stderr)
-                        except Exception as e:
-                            self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
-                            self.console.print(f"[yellow]You can try running it manually with: python {local_path} {target}[/yellow]")
-                
-                # C exploit
-                elif path.endswith(".c"):
-                    self.console.print("\n[bold green]This is a C exploit that needs to be compiled. Here's how to use it:[/bold green]")
-                    self.console.print(f"gcc -o exploit {local_path}")
-                    self.console.print(f"./exploit {target}")
-                    
-                    # Ask if the user wants to compile and run now
-                    self.console.print("\n[yellow]Would you like to compile and run this exploit now? (y/n)[/yellow]")
-                    response = input("> ").strip().lower()
-                    
-                    if response in ["y", "yes", ""]:
-                        # Compile the exploit
-                        self.console.print("[cyan]Compiling exploit...[/cyan]")
-                        try:
-                            compile_cmd = f"gcc -o exploit {local_path}"
-                            subprocess.run(compile_cmd, shell=True, check=True)
-                            self.console.print("[green]Compilation successful![/green]")
-                            
-                            # Run the exploit
-                            self.console.print(f"[cyan]Running: ./exploit {target}[/cyan]")
-                            subprocess.run(["./exploit", target])
-                        except subprocess.CalledProcessError:
-                            self.console.print("[red]Compilation failed. The exploit may need modifications to compile.[/red]")
-                        except Exception as e:
-                            self.console.print(f"[red]Error: {str(e)}[/red]")
-                
-                # PHP exploit
-                elif path.endswith(".php"):
-                    self.console.print("\n[bold green]This is a PHP exploit. Here's how to use it:[/bold green]")
-                    self.console.print(f"php {local_path} {target}")
-                    
-                    # Ask if the user wants to run it now
-                    self.console.print("\n[yellow]Would you like to run this exploit now? (y/n)[/yellow]")
-                    response = input("> ").strip().lower()
-                    
-                    if response in ["y", "yes", ""]:
-                        self.console.print(f"[cyan]Running: php {local_path} {target}[/cyan]")
-                        try:
-                            subprocess.run(["php", local_path, target])
-                        except Exception as e:
-                            self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
-                
-                # Plain text exploit or other type
-                else:
-                    self.console.print("\n[bold green]This looks like a text file with exploit instructions:[/bold green]")
-                    
-                    # Try to read the file content
-                    try:
-                        with open(local_path, 'r', errors='ignore') as f:
-                            content = f.read()
-                        
-                        # Check if file is too large
-                        if len(content) > 5000:
-                            # Show just the first part with relevant instructions
-                            self.console.print(content[:5000] + "\n\n[italic]... (content truncated, open the file to see more)[/italic]")
-                        else:
-                            self.console.print(content)
                     except Exception as e:
-                        self.console.print(f"[red]Error reading file: {str(e)}[/red]")
+                        self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
+                        self.console.print(f"[yellow]You can try running it manually with: python {local_path} {target}[/yellow]")
+                
+            # C exploit
+            elif local_path.endswith(".c"):
+                self.console.print("\n[bold green]This is a C exploit that needs to be compiled. Here's how to use it:[/bold green]")
+                self.console.print(f"gcc -o exploit {local_path}")
+                self.console.print(f"./exploit {target}")
+                
+                # Ask if the user wants to compile and run now
+                self.console.print("\n[yellow]Would you like to compile and run this exploit now? (y/n)[/yellow]")
+                response = input("> ").strip().lower()
+                
+                if response in ["y", "yes", ""]:
+                    # Compile the exploit
+                    self.console.print("[cyan]Compiling exploit...[/cyan]")
+                    try:
+                        compile_cmd = f"gcc -o exploit {local_path}"
+                        subprocess.run(compile_cmd, shell=True, check=True)
+                        self.console.print("[green]Compilation successful![/green]")
                         
-                    self.console.print(f"\n[yellow]You can view the full exploit instructions in: {local_path}[/yellow]")
+                        # Run the exploit
+                        self.console.print(f"[cyan]Running: ./exploit {target}[/cyan]")
+                        subprocess.run(["./exploit", target])
+                    except subprocess.CalledProcessError:
+                        self.console.print("[red]Compilation failed. The exploit may need modifications to compile.[/red]")
+                    except Exception as e:
+                        self.console.print(f"[red]Error: {str(e)}[/red]")
+            
+            # PHP exploit
+            elif local_path.endswith(".php"):
+                self.console.print("\n[bold green]This is a PHP exploit. Here's how to use it:[/bold green]")
+                self.console.print(f"php {local_path} {target}")
+                
+                # Ask if the user wants to run it now
+                self.console.print("\n[yellow]Would you like to run this exploit now? (y/n)[/yellow]")
+                response = input("> ").strip().lower()
+                
+                if response in ["y", "yes", ""]:
+                    self.console.print(f"[cyan]Running: php {local_path} {target}[/cyan]")
+                    try:
+                        subprocess.run(["php", local_path, target])
+                    except Exception as e:
+                        self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
+            
+            # Plain text exploit or other type
             else:
-                self.console.print("[yellow]Could not prepare the exploit locally. Try using searchsploit to locate it manually.[/yellow]")
-                self.console.print(f"[yellow]Command: searchsploit -p {path.split('/')[-1].split('.')[0]}[/yellow]")
+                self.console.print("\n[bold green]This looks like a text file with exploit instructions:[/bold green]")
+                
+                # Try to read the file content
+                try:
+                    with open(local_path, 'r', errors='ignore') as f:
+                        content = f.read()
+                    
+                    # Check if file is too large
+                    if len(content) > 5000:
+                        # Show just the first part with relevant instructions
+                        self.console.print(content[:5000] + "\n\n[italic]... (content truncated, open the file to see more)[/italic]")
+                    else:
+                        self.console.print(content)
+                except Exception as e:
+                    self.console.print(f"[red]Error reading file: {str(e)}[/red]")
+                    
+                self.console.print(f"\n[yellow]You can view the full exploit instructions in: {local_path}[/yellow]")
         else:
-            # Handle the case where exploit_info is a string
-            self.console.print(f"Basic information: {exploit_info}")
-            self.console.print("[yellow]Limited information available. Try using searchsploit to find more details.[/yellow]")
-            self.console.print(f"[yellow]Command: searchsploit {exploit_info}[/yellow]")
+            self.console.print("[yellow]Could not prepare the exploit locally. Try using searchsploit to locate it manually.[/yellow]")
+            if isinstance(exploit_info, dict) and 'path' in exploit_info:
+                path = exploit_info['path']
+                if path.startswith('|'):
+                    path = path.replace('|', '').strip()
+                self.console.print(f"[yellow]Command: searchsploit -p {path.split('/')[-1].split('.')[0]}[/yellow]")
+            else:
+                self.console.print("[yellow]Command: searchsploit -p <exploit_name>[/yellow]")
         
         # Always offer the option to perform a custom search
         self.console.print("\n[yellow]Would you like to perform a custom search for more exploits? (y/n)[/yellow]")
