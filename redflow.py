@@ -622,34 +622,51 @@ def interactive_menu():
     
     return args
 
+def get_logger():
+    """
+    Get a default logger instance for error handling
+    """
+    from rich.logging import RichHandler
+    import logging
+    
+    # Setup a basic logger for error handling before we have a proper project directory
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[RichHandler(rich_tracebacks=True)]
+    )
+    return logging.getLogger("redflow")
+
 def main():
     """Main execution function // פונקציית ביצוע ראשית"""
     try:
         # Parse command-line arguments
         args = parse_args()
         
+        # Get a basic logger for initial operations
+        default_logger = get_logger()
+        
         # Check if interactive menu was requested
         if hasattr(args, 'interactive_menu') and args.interactive_menu:
             args = interactive_menu()
         
         # Check requirements
-        check_requirements()
+        check_requirements(default_logger)
         
         # File operations
         if args.list_files or args.interactive_download or args.download_url or args.view_url:
-            handle_file_operations(args, get_logger(), Console())
+            handle_file_operations(args, default_logger, Console())
             return
             
         # Exploit operations
         if args.exploit_menu or args.search_exploits or args.service_to_exploit or args.port_to_exploit or args.run_msfconsole:
-            handle_exploit_operations(args, get_logger(), Console())
+            handle_exploit_operations(args, default_logger, Console())
             return
         
         # Validate target for regular scanning
         if not args.target:
-            logger = get_logger()
             console = Console()
-            logger.error("No target specified")
+            default_logger.error("No target specified")
             console.print("[bold red]Error:[/bold red] No target specified. Use --target to specify a target or --help for more information.")
             return
             
@@ -670,11 +687,17 @@ def main():
         scanner.start()
         
     except KeyboardInterrupt:
-        logger = get_logger()
+        try:
+            logger
+        except NameError:
+            logger = get_logger()
         logger.info("RedFlow manually stopped by user")
         Console().print("\n[bold yellow]RedFlow manually stopped by user[/bold yellow]")
     except Exception as e:
-        logger = get_logger()
+        try:
+            logger
+        except NameError:
+            logger = get_logger()
         logger.error(f"An unexpected error occurred: {str(e)}")
         Console().print(f"\n[bold red]Error:[/bold red] An unexpected error occurred: {str(e)}")
         
