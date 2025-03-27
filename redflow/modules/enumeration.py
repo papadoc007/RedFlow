@@ -2303,3 +2303,218 @@ class Enumeration:
         
         # If more than 10% is non-printable, it's likely binary
         return non_printable > len(content) * 0.1
+
+    def interactive_exploit_menu(self, service_type, service_name, version, target):
+        """
+        Interactive menu for finding and selecting exploits
+        
+        Args:
+            service_type (str): Type of service (http, ftp, etc)
+            service_name (str): Name of service (apache, vsftpd, etc)
+            version (str): Service version
+            target (str): Target IP or hostname
+        """
+        # Clear the screen for better readability
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
+        self.console.print(f"\n[bold cyan]Searching for known vulnerabilities in {service_name} {version}...[/bold cyan]")
+        
+        # Search for exploits using searchsploit
+        search_results = self.find_vulnerabilities_with_searchsploit(service_name, version)
+        vulnerabilities = search_results.get("vulnerabilities", [])
+        
+        if not vulnerabilities:
+            self.console.print(f"[yellow]No known vulnerabilities found for {service_name} {version}[/yellow]")
+            
+            # Offer custom search option
+            self.console.print("\n[bold cyan]Would you like to try a custom search term? (y/n)[/bold cyan]")
+            custom_search = input("> ").strip().lower()
+            
+            if custom_search in ['y', 'yes']:
+                self.console.print("[cyan]Enter custom search term (e.g., 'vsftpd backdoor'):[/cyan]")
+                search_term = input("> ").strip()
+                
+                if search_term:
+                    # Run searchsploit with custom term
+                    command = ["searchsploit", "--color", search_term]
+                    
+                    try:
+                        self.console.print(f"[cyan]Running: {' '.join(command)}[/cyan]")
+                        result = run_tool(command, timeout=30)
+                        output = result["stdout"]
+                        
+                        if "Exploits: No Results" not in output:
+                            # Parse and display results
+                            exploit_lines = []
+                            for line in output.splitlines():
+                                if not line.strip() or "------" in line or "Exploit Title" in line:
+                                    continue
+                                exploit_lines.append(line.strip())
+                            
+                            if exploit_lines:
+                                self.console.print(f"\n[green]Found {len(exploit_lines)} potential exploits![/green]")
+                                self.console.print("[bold cyan]Available exploits:[/bold cyan]")
+                                
+                                for i, line in enumerate(exploit_lines, 1):
+                                    parts = re.split(r'\s{2,}', line.strip())
+                                    if len(parts) >= 2:
+                                        title = parts[0].strip()
+                                        path = parts[-1].strip() if len(parts) > 2 else ""
+                                        self.console.print(f"[cyan]{i}.[/cyan] {title} [dim]({path})[/dim]")
+                                
+                                # Ask user to select an exploit
+                                self.console.print("\n[bold]Select an exploit to use (number) or 'q' to quit:[/bold]")
+                                selection = input("> ").strip().lower()
+                                
+                                if selection != 'q' and selection.isdigit():
+                                    idx = int(selection)
+                                    if 1 <= idx <= len(exploit_lines):
+                                        selected_line = exploit_lines[idx-1]
+                                        parts = re.split(r'\s{2,}', selected_line.strip())
+                                        if len(parts) >= 2:
+                                            path = parts[-1].strip() if len(parts) > 2 else ""
+                                            
+                                            if path:
+                                                # Prepare the exploit
+                                                exploit_info = self.prepare_exploit(path, target)
+                                                if exploit_info:
+                                                    self.display_exploit_instructions(exploit_info, target)
+                                                    return
+                                
+                                self.console.print("[yellow]Returning to main menu...[/yellow]")
+                                return
+                        else:
+                            self.console.print("[yellow]No results found for custom search.[/yellow]")
+                    except Exception as e:
+                        self.console.print(f"[red]Error searching for exploits: {str(e)}[/red]")
+            
+            # Return if custom search was not selected or returned no results
+            self.console.print("[yellow]Returning to main menu...[/yellow]")
+            return
+        
+        # Display found vulnerabilities and ask user to select one
+        self.console.print(f"\n[green]Found {len(vulnerabilities)} potential vulnerabilities![/green]")
+        self.console.print("[bold cyan]Available exploits:[/bold cyan]")
+        
+        for i, vuln in enumerate(vulnerabilities, 1):
+            title = vuln.get("title", "Unknown")
+            path = vuln.get("path", "")
+            self.console.print(f"[cyan]{i}.[/cyan] {title} [dim]({path})[/dim]")
+        
+        # Ask user to select an exploit
+        self.console.print("\n[bold]Select an exploit to use (number) or 'q' to quit:[/bold]")
+        selection = input("> ").strip().lower()
+        
+        if selection == 'q':
+            self.console.print("[yellow]Exploit menu closed.[/yellow]")
+            return
+        
+        try:
+            idx = int(selection)
+            if 1 <= idx <= len(vulnerabilities):
+                selected = vulnerabilities[idx-1]
+                path = selected.get("path", "")
+                
+                if path:
+                    # Prepare the exploit
+                    exploit_info = self.prepare_exploit(path, target)
+                    
+                    if exploit_info:
+                        self.display_exploit_instructions(exploit_info, target)
+                    else:
+                        self.console.print("[red]Failed to prepare exploit. Check if file exists and is accessible.[/red]")
+                else:
+                    self.console.print("[red]No path available for selected exploit.[/red]")
+            else:
+                self.console.print("[red]Invalid selection.[/red]")
+        except ValueError:
+            self.console.print("[red]Invalid input. Please enter a number.[/red]")
+    
+    def display_exploit_instructions(self, exploit_info, target):
+        """
+        Display instructions for using the selected exploit
+        
+        Args:
+            exploit_info (dict): Exploit information
+            target (str): Target IP or hostname
+        """
+        self.console.print("\n[bold green]Exploit Information:[/bold green]")
+        
+        if exploit_info["type"] == "metasploit":
+            # Special handling for Metasploit exploits
+            self.console.print(f"[cyan]Type:[/cyan] Metasploit Module")
+            self.console.print(f"[cyan]Module:[/cyan] {exploit_info['msf_module']}")
+            
+            self.console.print("\n[bold yellow]To run this exploit using Metasploit:[/bold yellow]")
+            self.console.print("[white]1. Start msfconsole:[/white]")
+            self.console.print("   msfconsole")
+            self.console.print("[white]2. Use the exploit module:[/white]")
+            self.console.print(f"   use exploit/{exploit_info['msf_module']}")
+            self.console.print("[white]3. Set the target:[/white]")
+            self.console.print(f"   set RHOSTS {target}")
+            self.console.print("[white]4. Run the exploit:[/white]")
+            self.console.print("   run")
+            
+            self.console.print("\n[bold yellow]Or run with one command:[/bold yellow]")
+            self.console.print(f"[white]{exploit_info['command']}[/white]")
+            
+            # Ask if user wants to run the exploit
+            self.console.print("\n[bold]Would you like to run this exploit now? (y/n)[/bold]")
+            run_now = input("> ").strip().lower()
+            
+            if run_now in ['y', 'yes']:
+                try:
+                    self.console.print(f"\n[bold yellow]Running: {exploit_info['command']}[/bold yellow]")
+                    subprocess.call(exploit_info['command'], shell=True)
+                except Exception as e:
+                    self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
+        else:
+            # Local exploit file
+            self.console.print(f"[cyan]Type:[/cyan] {exploit_info['type']}")
+            self.console.print(f"[cyan]Local Path:[/cyan] {exploit_info['local_path']}")
+            
+            if exploit_info["type"] == "python":
+                self.console.print("\n[bold yellow]To run this exploit:[/bold yellow]")
+                self.console.print(f"[white]python {exploit_info['local_path']} {target}[/white]")
+                
+                if "command" in exploit_info:
+                    self.console.print(f"\n[bold yellow]Or with recommended arguments:[/bold yellow]")
+                    self.console.print(f"[white]{exploit_info['command']}[/white]")
+            
+            elif exploit_info["type"] == "ruby":
+                self.console.print("\n[bold yellow]To run this exploit:[/bold yellow]")
+                self.console.print(f"[white]ruby {exploit_info['local_path']} {target}[/white]")
+                
+                if "command" in exploit_info:
+                    self.console.print(f"\n[bold yellow]Or with recommended arguments:[/bold yellow]")
+                    self.console.print(f"[white]{exploit_info['command']}[/white]")
+            
+            elif exploit_info["type"] == "php":
+                self.console.print("\n[bold yellow]To run this exploit:[/bold yellow]")
+                self.console.print("[white]This is a PHP exploit that typically requires a web server.[/white]")
+                self.console.print(f"[white]1. Copy {exploit_info['local_path']} to your web server directory[/white]")
+                self.console.print("[white]2. Access it via browser or using curl/wget[/white]")
+            
+            elif exploit_info["type"] == "c":
+                self.console.print("\n[bold yellow]To compile and run this exploit:[/bold yellow]")
+                self.console.print(f"[white]1. Compile: gcc {exploit_info['local_path']} -o {exploit_info['name']}[/white]")
+                self.console.print(f"[white]2. Run: ./{exploit_info['name']} {target}[/white]")
+                
+                if "command" in exploit_info:
+                    self.console.print(f"\n[bold yellow]Or with recommended commands:[/bold yellow]")
+                    self.console.print(f"[white]{exploit_info['command']}[/white]")
+            
+            else:
+                # Unknown type, try to show file content
+                self.console.print("\n[bold yellow]This is an unknown exploit type. File content preview:[/bold yellow]")
+                try:
+                    with open(exploit_info['local_path'], 'r', errors='ignore') as f:
+                        content = f.read(1000)  # Read first 1000 chars
+                        self.console.print(content)
+                        self.console.print("[dim]... (file content truncated)[/dim]")
+                except Exception as e:
+                    self.console.print(f"[red]Could not read file: {str(e)}[/red]")
+        
+        # Final reminder
+        self.console.print("\n[yellow]Note: Exploit may need adjustments for your specific environment.[/yellow]")
+        self.console.print("[yellow]Always review exploit code before execution in production environments.[/yellow]")
