@@ -1914,137 +1914,134 @@ class Enumeration:
 
     def find_vulnerabilities_with_searchsploit(self, service_name, version):
         """
-        Search for possible vulnerabilities using searchsploit
+        Search for vulnerabilities using searchsploit
         
         Args:
-            service_name (str): Name of service (e.g. vsftpd, apache)
-            version (str): Service version
+            service_name: Name of the service
+            version: Version of the service
             
         Returns:
-            dict: Dictionary with search results
+            Dictionary with search results
         """
-        self.console.print(f"[bold cyan]Searching for vulnerabilities for {service_name} {version}...[/bold cyan]")
+        self.logger.info(f"Searching for vulnerabilities for {service_name} {version}")
         
         results = {
-            "service": service_name,
+            "service_name": service_name,
             "version": version,
+            "search_term": f"{service_name} {version}",
             "vulnerabilities": [],
-            "searchsploit_command": "",
-            "raw_output": ""
+            "raw_output": "",
+            "error": None
         }
         
-        # Special case for known vulnerability: vsftpd 2.3.4 backdoor
+        # Special case for vsftpd 2.3.4 (because it's a very common vulnerability)
         if service_name.lower() == "vsftpd" and version == "2.3.4":
-            self.logger.info("Detected vsftpd 2.3.4 which has a known backdoor vulnerability")
-            results["vulnerabilities"].append({
-                "title": "vsftpd 2.3.4 - Backdoor Command Execution",
-                "path": "unix/remote/49757.py",
-                "raw": "vsftpd 2.3.4 - Backdoor Command Execution | unix/remote/49757.py"
-            })
-            results["vulnerabilities"].append({
-                "title": "vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)",
-                "path": "unix/remote/17491.rb",
-                "raw": "vsftpd 2.3.4 - Backdoor Command Execution (Metasploit) | unix/remote/17491.rb"
-            })
-            
-            # Add raw output for reference
-            results["raw_output"] = """
---------------------------------------------------------------------------------- ---------------------------------
- Exploit Title                                                                   |  Path
---------------------------------------------------------------------------------- ---------------------------------
-vsftpd 2.3.4 - Backdoor Command Execution                                        | unix/remote/49757.py
-vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                           | unix/remote/17491.rb
---------------------------------------------------------------------------------- ---------------------------------
-"""
-            results["searchsploit_command"] = "searchsploit vsftpd 2.3.4"
-            
-            self.console.print(f"[green]Found {len(results['vulnerabilities'])} potential vulnerabilities for {service_name} {version}![/green]")
+            self.logger.info("Detected vsftpd 2.3.4 backdoor vulnerability")
+            results["vulnerabilities"] = [
+                {
+                    "id": 1,
+                    "title": "vsftpd 2.3.4 - Backdoor Command Execution",
+                    "path": "unix/remote/49757.py",
+                    "description": "Python exploit for vsftpd 2.3.4 backdoor"
+                },
+                {
+                    "id": 2,
+                    "title": "vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)",
+                    "path": "unix/remote/17491.rb",
+                    "description": "Metasploit module for vsftpd 2.3.4 backdoor"
+                }
+            ]
             return results
-        
-        # Clean version and service name for better search
-        clean_version = re.sub(r'[^0-9.]', '', version)  # Keep only numbers and dots
-        search_terms = []
-        
-        # Create multiple search variations
-        if clean_version:
-            # Search by exact version
-            search_terms.append(f"{service_name} {clean_version}")
             
-            # Search by major version only
-            major_version = clean_version.split('.')[0] if '.' in clean_version else clean_version
-            search_terms.append(f"{service_name} {major_version}")
-            
-            # Search by major and minor version
-            if '.' in clean_version:
-                parts = clean_version.split('.')
-                if len(parts) >= 2:
-                    major_minor = f"{parts[0]}.{parts[1]}"
-                    search_terms.append(f"{service_name} {major_minor}")
+        # Clean the search term to make it more compatible with searchsploit
+        search_term = f"{service_name} {version}"
+        self.logger.info(f"Running searchsploit with term: {search_term}")
         
-        # Add search by service name only
-        search_terms.append(service_name)
-        
-        # Run searchsploit for each search term
-        for search_term in search_terms:
-            # Build searchsploit command
+        try:
+            # Try the full search first
             command = ["searchsploit", "--color", search_term]
+            full_result = run_tool(command, timeout=30)
+            results["raw_output"] = full_result["stdout"]
             
-            try:
-                self.logger.info(f"Running searchsploit with term: {search_term}")
-                result = run_tool(command, timeout=30)
-                output = result["stdout"]
+            # Check if we got any results
+            if "Exploits: No Results" not in full_result["stdout"] and not "No results" in full_result["stdout"]:
+                # Parse the output to extract exploits
+                self._parse_searchsploit_output(full_result["stdout"], results)
+            else:
+                # Try with just the service name if version is provided
+                if version:
+                    search_term = service_name
+                    self.logger.info(f"Running searchsploit with term: {search_term}")
+                    command = ["searchsploit", "--color", search_term]
+                    service_result = run_tool(command, timeout=30)
+                    results["raw_output"] += "\n" + service_result["stdout"]
+                    
+                    if "Exploits: No Results" not in service_result["stdout"] and not "No results" in service_result["stdout"]:
+                        # Found some results with service name only
+                        self._parse_searchsploit_output(service_result["stdout"], results)
                 
-                if result["returncode"] == 0 and "No Results" not in output:
-                    results["searchsploit_command"] = " ".join(command)
-                    results["raw_output"] = output
+                # Try with just the major version if it exists
+                if version and "." in version:
+                    major_version = version.split(".")[0]
+                    search_term = f"{service_name} {major_version}"
+                    self.logger.info(f"Running searchsploit with term: {search_term}")
+                    command = ["searchsploit", "--color", search_term]
+                    major_version_result = run_tool(command, timeout=30)
+                    results["raw_output"] += "\n" + major_version_result["stdout"]
                     
-                    # Output full results to temp file
-                    output_file = os.path.join(self.config.output_dir, f"searchsploit_{service_name}_{clean_version}.txt")
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        f.write(output)
-                    
-                    # Parse results - searchsploit outputs a table format
-                    lines = output.splitlines()
-                    for line in lines:
-                        # Skip header or empty lines
-                        if not line.strip() or "-------" in line or "Exploit Title" in line or "Shellcodes:" in line:
-                            continue
-                        
-                        # Try to extract vulnerability details
-                        try:
-                            if "|" in line:
-                                parts = line.split("|")
-                                if len(parts) >= 2:
-                                    title = parts[0].strip()
-                                    path = parts[1].strip()
-                                    
-                                    vuln = {
-                                        "title": title,
-                                        "path": path,
-                                        "raw": line.strip()
-                                    }
-                                    
-                                    # Check if this is a new exploit not already found
-                                    if not any(v["title"] == vuln["title"] for v in results["vulnerabilities"]):
-                                        results["vulnerabilities"].append(vuln)
-                                        self.logger.info(f"Found exploit: {title}")
-                        except Exception as e:
-                            self.logger.debug(f"Error parsing searchsploit line: {str(e)}")
-                    
-                    # If we found results, stop searching
-                    if results["vulnerabilities"]:
-                        break
-            
-            except Exception as e:
-                self.logger.error(f"Error running searchsploit: {str(e)}")
+                    if "Exploits: No Results" not in major_version_result["stdout"] and not "No results" in major_version_result["stdout"]:
+                        # Found some results with major version
+                        self._parse_searchsploit_output(major_version_result["stdout"], results)
         
-        # Show summary of results
-        if results["vulnerabilities"]:
-            self.console.print(f"[green]Found {len(results['vulnerabilities'])} potential vulnerabilities for {service_name} {version}![/green]")
-        else:
-            self.console.print(f"[yellow]No known vulnerabilities found for {service_name} {version}[/yellow]")
+        except Exception as e:
+            self.logger.error(f"Error running searchsploit: {str(e)}")
+            results["error"] = str(e)
         
         return results
+    
+    def _parse_searchsploit_output(self, output, results):
+        """
+        Parse searchsploit output to extract exploit information
+        
+        Args:
+            output: Searchsploit command output
+            results: Results dictionary to update
+        """
+        try:
+            lines = output.splitlines()
+            exploit_lines = []
+            
+            # Find the exploit lines in the output
+            for line in lines:
+                if not line.strip() or "Exploits:" in line or "Shellcodes:" in line or "-" * 10 in line or "Title" in line:
+                    continue
+                exploit_lines.append(line)
+            
+            for i, line in enumerate(exploit_lines):
+                exploit_info = {}
+                
+                # Handle different searchsploit output formats
+                if "|" in line:  # New format with |
+                    parts = line.split("|")
+                    if len(parts) >= 2:
+                        exploit_info["id"] = i + 1
+                        exploit_info["title"] = parts[0].strip()
+                        exploit_info["path"] = parts[1].strip()
+                else:  # Older format with spaces
+                    parts = re.split(r'\s{2,}', line.strip())
+                    if len(parts) >= 2:
+                        exploit_info["id"] = i + 1
+                        exploit_info["title"] = parts[0].strip()
+                        exploit_info["path"] = parts[-1].strip() if len(parts) > 1 else ""
+                
+                if exploit_info and "path" in exploit_info and exploit_info["path"]:
+                    results["vulnerabilities"].append(exploit_info)
+            
+            self.logger.info(f"Found {len(results['vulnerabilities'])} potential vulnerabilities")
+        
+        except Exception as e:
+            self.logger.error(f"Error parsing searchsploit output: {str(e)}")
+            results["error"] = f"Error parsing output: {str(e)}"
 
     def prepare_exploit(self, exploit_path, target):
         """
@@ -2462,9 +2459,15 @@ vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                          
         # Search for exploits using searchsploit
         search_results = self.find_vulnerabilities_with_searchsploit(service_name, version)
         vulnerabilities = search_results.get("vulnerabilities", [])
+        raw_output = search_results.get("raw_output", "")
         
         if not vulnerabilities:
             self.console.print(f"[yellow]No known vulnerabilities found for {service_name} {version}[/yellow]")
+            
+            # Display raw searchsploit output if available
+            if raw_output:
+                self.console.print("\n[bold]Raw searchsploit output:[/bold]")
+                self.console.print(raw_output)
             
             # Offer custom search option
             self.console.print("\n[bold cyan]Would you like to try a custom search term? (y/n)[/bold cyan]")
@@ -2482,6 +2485,10 @@ vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                          
                         self.console.print(f"[cyan]Running: {' '.join(command)}[/cyan]")
                         result = run_tool(command, timeout=30)
                         output = result["stdout"]
+                        
+                        # Always display raw output first
+                        self.console.print("\n[bold cyan]searchsploit output:[/bold cyan]")
+                        self.console.print(output)
                         
                         if "Exploits: No Results" not in output and "No Results" not in output:
                             # Parse and display results
@@ -2605,7 +2612,13 @@ vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                          
         
         # Display found vulnerabilities and ask user to select one
         self.console.print(f"\n[green]Found {len(vulnerabilities)} potential vulnerabilities![/green]")
-        self.console.print("[bold cyan]Available exploits:[/bold cyan]")
+        
+        # Display raw searchsploit output
+        self.console.print("\n[bold cyan]Raw searchsploit output:[/bold cyan]")
+        self.console.print(raw_output)
+        
+        # Display vulnerabilities in a structured format
+        self.console.print("\n[bold cyan]Available exploits:[/bold cyan]")
         
         for i, vuln in enumerate(vulnerabilities, 1):
             title = vuln.get("title", "Unknown")
@@ -2655,6 +2668,22 @@ vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                          
                                 elif file_ext == ".c":
                                     exploit_type = "c"
                                 
+                                # Check if it's a Metasploit module
+                                if "metasploit" in path.lower() or file_ext == ".rb":
+                                    # Try to extract Metasploit module path
+                                    msf_module = self._extract_metasploit_path(path)
+                                    if msf_module:
+                                        exploit_info = {
+                                            "type": "metasploit",
+                                            "path": path,
+                                            "local_path": local_path,
+                                            "msf_module": msf_module,
+                                            "command": f"msfconsole -q -x 'use {msf_module}; set RHOSTS {target}; run'"
+                                        }
+                                        self.display_exploit_instructions(exploit_info, target)
+                                        return
+                                
+                                # Regular exploit
                                 exploit_info = {
                                     "type": exploit_type,
                                     "path": path,
@@ -2693,89 +2722,110 @@ vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                          
     
     def display_exploit_instructions(self, exploit_info, target):
         """
-        Display instructions for using the selected exploit
+        Display instructions for using the exploit
         
         Args:
-            exploit_info (dict): Exploit information
-            target (str): Target IP or hostname
+            exploit_info: Dictionary with exploit information
+            target: Target IP or hostname
         """
-        self.console.print("\n[bold green]Exploit Information:[/bold green]")
+        if not exploit_info:
+            self.console.print("[red]No exploit information available[/red]")
+            return
         
-        if exploit_info["type"] == "metasploit":
-            # Special handling for Metasploit exploits
-            self.console.print(f"[cyan]Type:[/cyan] Metasploit Module")
-            self.console.print(f"[cyan]Module:[/cyan] {exploit_info['msf_module']}")
-            
-            self.console.print("\n[bold yellow]To run this exploit using Metasploit:[/bold yellow]")
-            self.console.print("[white]1. Start msfconsole:[/white]")
-            self.console.print("   msfconsole")
-            self.console.print("[white]2. Use the exploit module:[/white]")
-            self.console.print(f"   use exploit/{exploit_info['msf_module']}")
-            self.console.print("[white]3. Set the target:[/white]")
-            self.console.print(f"   set RHOSTS {target}")
-            self.console.print("[white]4. Run the exploit:[/white]")
-            self.console.print("   run")
-            
-            self.console.print("\n[bold yellow]Or run with one command:[/bold yellow]")
-            self.console.print(f"[white]{exploit_info['command']}[/white]")
-            
-            # Ask if user wants to run the exploit
-            self.console.print("\n[bold]Would you like to run this exploit now? (y/n)[/bold]")
-            run_now = input("> ").strip().lower()
-            
-            if run_now in ['y', 'yes']:
-                try:
-                    self.console.print(f"\n[bold yellow]Running: {exploit_info['command']}[/bold yellow]")
-                    subprocess.call(exploit_info['command'], shell=True)
-                except Exception as e:
-                    self.console.print(f"[red]Error running exploit: {str(e)}[/red]")
-        else:
-            # Local exploit file
-            self.console.print(f"[cyan]Type:[/cyan] {exploit_info['type']}")
-            self.console.print(f"[cyan]Local Path:[/cyan] {exploit_info['local_path']}")
-            
-            if exploit_info["type"] == "python":
-                self.console.print("\n[bold yellow]To run this exploit:[/bold yellow]")
-                self.console.print(f"[white]python {exploit_info['local_path']} {target}[/white]")
+        self.console.print("\n[bold]Exploit Information:[/bold]")
+        
+        exploit_type = exploit_info.get("type", "unknown")
+        self.console.print(f"Type: {exploit_type.capitalize()}")
+        
+        # Special handling for Metasploit exploits
+        if exploit_type == "metasploit":
+            msf_module = exploit_info.get("msf_module", "")
+            if msf_module:
+                self.console.print(f"Module: {msf_module}")
                 
-                if "command" in exploit_info:
-                    self.console.print(f"\n[bold yellow]Or with recommended arguments:[/bold yellow]")
-                    self.console.print(f"[white]{exploit_info['command']}[/white]")
-            
-            elif exploit_info["type"] == "ruby":
-                self.console.print("\n[bold yellow]To run this exploit:[/bold yellow]")
-                self.console.print(f"[white]ruby {exploit_info['local_path']} {target}[/white]")
+                self.console.print("\n[bold]To run this exploit using Metasploit:[/bold]")
+                self.console.print("1. Start msfconsole:")
+                self.console.print("   msfconsole")
+                self.console.print("2. Use the exploit module:")
+                self.console.print(f"   use exploit/{msf_module}")
+                self.console.print("3. Set the target:")
+                self.console.print(f"   set RHOSTS {target}")
+                self.console.print("4. Run the exploit:")
+                self.console.print("   run")
                 
-                if "command" in exploit_info:
-                    self.console.print(f"\n[bold yellow]Or with recommended arguments:[/bold yellow]")
-                    self.console.print(f"[white]{exploit_info['command']}[/white]")
-            
-            elif exploit_info["type"] == "php":
-                self.console.print("\n[bold yellow]To run this exploit:[/bold yellow]")
-                self.console.print("[white]This is a PHP exploit that typically requires a web server.[/white]")
-                self.console.print(f"[white]1. Copy {exploit_info['local_path']} to your web server directory[/white]")
-                self.console.print("[white]2. Access it via browser or using curl/wget[/white]")
-            
-            elif exploit_info["type"] == "c":
-                self.console.print("\n[bold yellow]To compile and run this exploit:[/bold yellow]")
-                self.console.print(f"[white]1. Compile: gcc {exploit_info['local_path']} -o {exploit_info['name']}[/white]")
-                self.console.print(f"[white]2. Run: ./{exploit_info['name']} {target}[/white]")
+                self.console.print("\n[bold]Or run with one command:[/bold]")
+                one_line_cmd = f"msfconsole -q -x 'use exploit/{msf_module}; set RHOSTS {target}; run'"
+                self.console.print(one_line_cmd)
                 
-                if "command" in exploit_info:
-                    self.console.print(f"\n[bold yellow]Or with recommended commands:[/bold yellow]")
-                    self.console.print(f"[white]{exploit_info['command']}[/white]")
-            
+                # Ask if user wants to run the exploit
+                self.console.print("\n[bold yellow]Would you like to run this exploit now? (y/n)[/bold yellow]")
+                response = input("> ").strip().lower()
+                
+                if response in ["y", "yes"]:
+                    try:
+                        self.console.print(f"\n[cyan]Running: {one_line_cmd}[/cyan]")
+                        command = ["msfconsole", "-q", "-x", f"use exploit/{msf_module}; set RHOSTS {target}; run"]
+                        result = run_tool(command, timeout=600)  # Longer timeout for Metasploit
+                        
+                        if result["returncode"] != 0:
+                            self.console.print(f"[red]Error running Metasploit: {result['stderr']}[/red]")
+                        
+                        # Display output regardless of return code
+                        if result["stdout"]:
+                            self.console.print(result["stdout"])
+                    except Exception as e:
+                        self.console.print(f"[red]Error: {str(e)}[/red]")
             else:
-                # Unknown type, try to show file content
-                self.console.print("\n[bold yellow]This is an unknown exploit type. File content preview:[/bold yellow]")
-                try:
-                    with open(exploit_info['local_path'], 'r', errors='ignore') as f:
-                        content = f.read(1000)  # Read first 1000 chars
-                        self.console.print(content)
-                        self.console.print("[dim]... (file content truncated)[/dim]")
-                except Exception as e:
-                    self.console.print(f"[red]Could not read file: {str(e)}[/red]")
+                self.console.print("[yellow]Metasploit module path not found[/yellow]")
+                
+        # Display local file path if available
+        if "local_path" in exploit_info:
+            self.console.print(f"Local path: {exploit_info['local_path']}")
         
-        # Final reminder
-        self.console.print("\n[yellow]Note: Exploit may need adjustments for your specific environment.[/yellow]")
-        self.console.print("[yellow]Always review exploit code before execution in production environments.[/yellow]")
+        # Display command if available
+        if "command" in exploit_info and exploit_type != "metasploit":
+            # Replace 'localhost' or similar with the actual target
+            command = exploit_info["command"]
+            command = command.replace("localhost", target)
+            command = command.replace("127.0.0.1", target)
+            
+            self.console.print(f"\n[bold]Command to run:[/bold]")
+            self.console.print(command)
+            
+            # Ask if user wants to run the command
+            self.console.print("\n[bold yellow]Would you like to run this command now? (y/n)[/bold yellow]")
+            response = input("> ").strip().lower()
+            
+            if response in ["y", "yes"]:
+                try:
+                    self.console.print(f"\n[cyan]Running: {command}[/cyan]")
+                    # Use shell=True to handle complex commands with pipes, redirects, etc.
+                    result = run_tool(command, shell=True, timeout=300)
+                    
+                    if result["returncode"] != 0:
+                        self.console.print(f"[red]Command failed with return code {result['returncode']}[/red]")
+                    
+                    # Display output regardless of return code
+                    if result["stdout"]:
+                        self.console.print(result["stdout"])
+                    if result["stderr"]:
+                        self.console.print(f"[red]{result['stderr']}[/red]")
+                except Exception as e:
+                    self.console.print(f"[red]Error: {str(e)}[/red]")
+        
+        # If no recognized exploit type, try to display file content
+        elif exploit_type == "unknown" and "local_path" in exploit_info:
+            local_path = exploit_info["local_path"]
+            try:
+                with open(local_path, 'r', errors='replace') as f:
+                    content = f.read()
+                    
+                if not self._is_binary(content):
+                    # Display some of the file content
+                    content_preview = content[:500] + "..." if len(content) > 500 else content
+                    self.console.print("\n[bold]Exploit content preview:[/bold]")
+                    self.console.print(f"```\n{content_preview}\n```")
+                else:
+                    self.console.print("[yellow]Binary file, cannot display content[/yellow]")
+            except Exception as e:
+                self.console.print(f"[yellow]Could not read file: {str(e)}[/yellow]")
