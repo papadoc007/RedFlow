@@ -79,6 +79,13 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--no-vulns",
+        dest="scan_vulns",
+        action="store_false",
+        help="Skip vulnerability scanning (faster execution)"
+    )
+    
+    parser.add_argument(
         "--version",
         action="version",
         version=f"RedFlow v{__version__}"

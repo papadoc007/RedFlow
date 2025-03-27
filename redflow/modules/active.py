@@ -66,22 +66,46 @@ class ActiveRecon:
         ) as progress:
             # First do a quick scan to identify open ports
             if specific_port:
+                # If a specific port is specified, do a faster focused scan
                 quick_scan_task = progress.add_task(f"[cyan]Scanning port {specific_port}...", total=1)
-            else:
-                quick_scan_task = progress.add_task("[cyan]Performing quick port scan...", total=1)
+                self._perform_quick_portscan()
+                progress.update(quick_scan_task, completed=1)
                 
-            self._perform_quick_portscan()
-            progress.update(quick_scan_task, completed=1)
-            
-            # Detailed service scan
-            service_scan_task = progress.add_task("[cyan]Performing detailed service scan...", total=1)
-            self._perform_service_scan()
-            progress.update(service_scan_task, completed=1)
-            
-            # Run NSE Scripts
-            vuln_scan_task = progress.add_task("[cyan]Performing vulnerability scan...", total=1)
-            self._perform_vuln_scan()
-            progress.update(vuln_scan_task, completed=1)
+                if not self.results["open_ports"]:
+                    self.logger.warning(f"Port {specific_port} is not open")
+                    self.console.print(f"[bold red]Port {specific_port} is not open[/bold red]")
+                    return self.results
+                
+                # Perform focused service scan on that port
+                service_scan_task = progress.add_task(f"[cyan]Identifying service on port {specific_port}...", total=1)
+                self._perform_service_scan()
+                progress.update(service_scan_task, completed=1)
+                
+                # Only perform vulnerability scan if explicitly requested
+                if self.config.scan_vulns:
+                    vuln_scan_task = progress.add_task(f"[cyan]Checking vulnerabilities on port {specific_port}...", total=1)
+                    self._perform_vuln_scan()
+                    progress.update(vuln_scan_task, completed=1)
+            else:
+                # For a full scan, do all the steps
+                quick_scan_task = progress.add_task("[cyan]Performing quick port scan...", total=1)
+                self._perform_quick_portscan()
+                progress.update(quick_scan_task, completed=1)
+                
+                # Only continue if we found open ports
+                if not self.results["open_ports"]:
+                    self.logger.warning("No open ports found")
+                    return self.results
+                
+                # Detailed service scan
+                service_scan_task = progress.add_task("[cyan]Performing detailed service scan...", total=1)
+                self._perform_service_scan()
+                progress.update(service_scan_task, completed=1)
+                
+                # Run NSE Scripts
+                vuln_scan_task = progress.add_task("[cyan]Performing vulnerability scan...", total=1)
+                self._perform_vuln_scan()
+                progress.update(vuln_scan_task, completed=1)
         
         # After all scans are completed
         self._show_results_summary()

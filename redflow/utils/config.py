@@ -27,6 +27,7 @@ class Config:
         self.interactive = args.interactive
         self.use_gpt = args.use_gpt
         self.verbose = args.verbose
+        self.scan_vulns = getattr(args, 'scan_vulns', True)  # Default to True if not provided
         
         # Project directory paths // נתיבים לתיקיות הפרויקט
         self.scans_dir = os.path.join(self.output_dir, "scans")
