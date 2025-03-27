@@ -29,6 +29,7 @@ EN = {
     "logs_tab": "Logs",
     "target_frame": "Target",
     "target_label": "IP or Domain:",
+    "port_label": "Port:",
     "scan_mode_frame": "Scan Mode",
     "passive_only": "Passive Only",
     "active_only": "Active Only",
@@ -105,6 +106,7 @@ HE = {
     "logs_tab": "לוגים",
     "target_frame": "מטרה",
     "target_label": "כתובת IP או דומיין:",
+    "port_label": "פורט:",
     "scan_mode_frame": "מצב סריקה",
     "passive_only": "סריקה פסיבית בלבד",
     "active_only": "סריקה אקטיבית בלבד",
@@ -230,26 +232,34 @@ class RedFlowGUI:
         self.setup_logs_tab()
     
     def setup_scan_tab(self):
-        """Set up the scanning tab"""
-        # Target Frame
-        target_frame = ttk.LabelFrame(self.scan_tab, text=self.lang["target_frame"])
-        target_frame.pack(fill=tk.X, padx=10, pady=10)
+        """Setup the scan tab"""
+        scan_frame = ttk.Frame(self.notebook)
+        self.notebook.add(scan_frame, text=self.lang["scan_tab"])
+        
+        # Target section
+        target_frame = ttk.LabelFrame(scan_frame, text=self.lang["target_frame"], padding=(10, 5))
+        target_frame.pack(fill=tk.X, padx=10, pady=5)
         
         ttk.Label(target_frame, text=self.lang["target_label"]).grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.target_entry = ttk.Entry(target_frame, width=40)
         self.target_entry.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
         
-        # Scan Mode Frame
-        mode_frame = ttk.LabelFrame(self.scan_tab, text=self.lang["scan_mode_frame"])
-        mode_frame.pack(fill=tk.X, padx=10, pady=10)
+        # Add specific port entry
+        ttk.Label(target_frame, text=self.lang["port_label"]).grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+        self.port_entry = ttk.Entry(target_frame, width=10)
+        self.port_entry.grid(row=0, column=3, sticky=tk.W, padx=5, pady=5)
+        
+        # Scan mode section
+        mode_frame = ttk.LabelFrame(scan_frame, text=self.lang["scan_mode_frame"], padding=(10, 5))
+        mode_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.scan_mode = tk.StringVar(value="full")
-        ttk.Radiobutton(mode_frame, text=self.lang["passive_only"], variable=self.scan_mode, value="passive").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        ttk.Radiobutton(mode_frame, text=self.lang["active_only"], variable=self.scan_mode, value="active").grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        ttk.Radiobutton(mode_frame, text=self.lang["full_scan"], variable=self.scan_mode, value="full").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+        ttk.Radiobutton(mode_frame, text=self.lang["passive_only"], variable=self.scan_mode, value="passive").grid(row=0, column=0, padx=20, pady=5, sticky=tk.W)
+        ttk.Radiobutton(mode_frame, text=self.lang["active_only"], variable=self.scan_mode, value="active").grid(row=0, column=1, padx=20, pady=5, sticky=tk.W)
+        ttk.Radiobutton(mode_frame, text=self.lang["full_scan"], variable=self.scan_mode, value="full").grid(row=0, column=2, padx=20, pady=5, sticky=tk.W)
         
         # Options Frame
-        options_frame = ttk.LabelFrame(self.scan_tab, text=self.lang["options_frame"])
+        options_frame = ttk.LabelFrame(scan_frame, text=self.lang["options_frame"])
         options_frame.pack(fill=tk.X, padx=10, pady=10)
         
         self.interactive_var = tk.BooleanVar(value=True)
@@ -262,7 +272,7 @@ class RedFlowGUI:
         ttk.Checkbutton(options_frame, text=self.lang["verbose_mode"], variable=self.verbose_var).grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
         
         # Output Directory Frame
-        output_frame = ttk.LabelFrame(self.scan_tab, text=self.lang["output_frame"])
+        output_frame = ttk.LabelFrame(scan_frame, text=self.lang["output_frame"])
         output_frame.pack(fill=tk.X, padx=10, pady=10)
         
         ttk.Label(output_frame, text=self.lang["path_label"]).grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
@@ -272,7 +282,7 @@ class RedFlowGUI:
         ttk.Button(output_frame, text=self.lang["browse_button"], command=self.browse_output_dir).grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
         
         # Action Buttons
-        buttons_frame = ttk.Frame(self.scan_tab)
+        buttons_frame = ttk.Frame(scan_frame)
         buttons_frame.pack(fill=tk.X, padx=10, pady=20)
         
         ttk.Button(buttons_frame, text=self.lang["start_button"], command=self.start_scan, width=20).pack(side=tk.LEFT, padx=5)
@@ -280,7 +290,7 @@ class RedFlowGUI:
         ttk.Button(buttons_frame, text=self.lang["clear_button"], command=self.clear_fields, width=20).pack(side=tk.LEFT, padx=5)
         
         # Progress Frame
-        progress_frame = ttk.LabelFrame(self.scan_tab, text=self.lang["progress_frame"])
+        progress_frame = ttk.LabelFrame(scan_frame, text=self.lang["progress_frame"])
         progress_frame.pack(fill=tk.X, padx=10, pady=10)
         
         self.progress = ttk.Progressbar(progress_frame, orient=tk.HORIZONTAL, length=300, mode='indeterminate')
@@ -440,6 +450,14 @@ class RedFlowGUI:
         use_gpt = self.gpt_var.get()
         verbose = self.verbose_var.get()
         
+        # Get specific port if provided
+        specific_port = None
+        if self.port_entry.get().strip():
+            try:
+                specific_port = int(self.port_entry.get().strip())
+            except ValueError:
+                messagebox.showwarning("Warning", "Port must be a number. Ignoring specific port.")
+        
         # Create args object for config
         class Args:
             pass
@@ -451,6 +469,10 @@ class RedFlowGUI:
         args.interactive = interactive
         args.use_gpt = use_gpt
         args.verbose = verbose
+        
+        # Add specific port if provided
+        if specific_port:
+            args.specific_port = specific_port
         
         # Start scan in a separate thread
         self.scan_thread = threading.Thread(target=self.run_scan, args=(args,))

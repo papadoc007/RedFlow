@@ -109,6 +109,8 @@ class Scanner:
             table.add_row("Hostname", self.target_info["hostname"])
         
         table.add_row("Scan Mode", self.config.mode)
+        if hasattr(self.config, 'specific_port') and self.config.specific_port:
+            table.add_row("Specific Port", str(self.config.specific_port))
         table.add_row("Output Directory", self.config.output_dir)
         table.add_row("Interactive Mode", "Enabled" if self.config.interactive else "Disabled")
         table.add_row("GPT Integration", "Enabled" if self.config.use_gpt else "Disabled")
@@ -160,12 +162,62 @@ class Scanner:
             self.logger.info(f"Starting active information gathering for {self.config.target}")
             self.console.print("[bold blue]== Active Information Gathering ==[/bold blue]")
             
-            active_results = self.active_recon.run()
+            # If specific port is set, pass it to active_recon
+            if hasattr(self.config, 'specific_port') and self.config.specific_port:
+                self.console.print(f"[bold yellow]Focusing on specific port: {self.config.specific_port}[/bold yellow]")
+                self.logger.info(f"Focusing scan on port {self.config.specific_port}")
+                active_results = self.active_recon.run(specific_port=self.config.specific_port)
+            else:
+                active_results = self.active_recon.run()
+                
             self.results["active_recon"] = active_results
             self.results["open_ports"] = active_results.get("open_ports", [])
             self.results["discovered_services"] = active_results.get("discovered_services", [])
             self.save_results()
             
+            # If there's a specific port and it was found open, jump to exploit menu
+            if hasattr(self.config, 'specific_port') and self.config.specific_port:
+                specific_port_found = False
+                service_info = None
+                
+                for service in self.results["discovered_services"]:
+                    if str(service.get("port", "")) == str(self.config.specific_port):
+                        specific_port_found = True
+                        service_info = service
+                        break
+                
+                if specific_port_found and service_info:
+                    self.logger.info(f"Port {self.config.specific_port} was found open, proceeding to exploitation")
+                    self.console.print(f"[bold green]Port {self.config.specific_port} is open. Proceeding to exploit menu.[/bold green]")
+                    
+                    # Continue with enumeration before exploitation
+                    self.logger.info(f"Starting service enumeration for {self.config.target}")
+                    self.console.print("[bold blue]== Service Enumeration ==[/bold blue]")
+                    
+                    enum_results = self.enumeration.run(self.results["discovered_services"])
+                    self.results["enumeration"] = enum_results
+                    self.save_results()
+                    
+                    # Launch exploit menu for the specific service
+                    service_name = service_info.get("name", "")
+                    if "product" in service_info:
+                        service_name = service_info["product"].lower()
+                    
+                    self.console.print(f"[bold blue]== Exploitation Menu for Port {self.config.specific_port} ==[/bold blue]")
+                    self.enumeration.interactive_exploit_menu(
+                        service_info.get("name", "").lower(),
+                        service_name,
+                        service_info.get("version", ""),
+                        self.config.target
+                    )
+                    
+                    self.finish()
+                    return
+                else:
+                    self.logger.warning(f"Specified port {self.config.specific_port} was not found open")
+                    self.console.print(f"[bold red]Port {self.config.specific_port} was not found open.[/bold red]")
+            
+            # Continue with normal flow if no specific port or if specific port not found
             # Ask user if they want to continue
             if not self.prompt_continue("Enumeration and Service Interrogation"):
                 self.finish()
@@ -200,7 +252,7 @@ class Scanner:
                     self.console.print("[bold blue]== Interactive Exploit Menu ==[/bold blue]")
                     self.exploitation.interactive_exploit_launcher()
         
-        # Generate final report
+        # Complete scan
         self.finish()
     
     def save_results(self):

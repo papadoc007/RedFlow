@@ -44,6 +44,13 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--port", "-p",
+        dest="specific_port",
+        type=int,
+        help="Scan and focus on a specific port (e.g., 21 for FTP)"
+    )
+    
+    parser.add_argument(
         "--output", "-o",
         dest="output",
         default="./scans/",

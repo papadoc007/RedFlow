@@ -11,6 +11,8 @@ RedFlow הוא כלי Python מבוסס-CLI (עם אפשרות להרחבות GU
 - Open port and service identification
 - Automatic recommendation or execution of appropriate attack tools (e.g., Gobuster, Enum4linux, Hydra)
 - **Vulnerability detection and interactive exploitation**
+- **Enhanced searchsploit integration with custom search options**
+- **Port-focused scanning and exploitation**
 - **File discovery and downloading from web and FTP services**
 - **Recursive directory scanning**
 - **Integration with searchsploit for finding vulnerabilities and exploits**
@@ -27,6 +29,8 @@ RedFlow הוא כלי Python מבוסס-CLI (עם אפשרות להרחבות GU
 - זיהוי פורטים פתוחים ושירותים
 - המלצה או הפעלה אוטומטית של כלי תקיפה המתאימים (למשל Gobuster, Enum4linux, Hydra)
 - **זיהוי פגיעויות וניצול אינטראקטיבי שלהן**
+- **אינטגרציה משופרת עם searchsploit ואפשרויות חיפוש מותאמות אישית**
+- **סריקה וניצול ממוקדים בפורט ספציפי**
 - **גילוי והורדת קבצים משירותי אינטרנט ו-FTP**
 - **סריקת תיקיות באופן רקורסיבי**
 - **אינטגרציה עם searchsploit למציאת פגיעויות ומנגנוני ניצול**
@@ -63,7 +67,7 @@ python redflow.py --target example.com --mode full
 ### All Possible CLI Parameters / כל הפרמטרים האפשריים ב-CLI
 
 ```bash
-usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output OUTPUT] [--interactive] [--gpt] [--verbose] [--version]
+usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PORT] [--output OUTPUT] [--interactive] [--gpt] [--verbose] [--version]
                  [--list-files] [--interactive-download] [--port PORT] [--protocol {http,https,ftp}] [--download DOWNLOAD_URL]
                  [--view VIEW_URL] [--results-dir RESULTS_DIR] [--exploit-menu] [--search-exploits SEARCH_EXPLOITS]
                  [--port-to-exploit PORT_TO_EXPLOIT] [--service-to-exploit SERVICE_TO_EXPLOIT]
@@ -73,6 +77,7 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
 |-----------|----------|-------------|---------|---------|
 | `--target` | `-t` | IP address or domain of the target | (Required) | `--target example.com` |
 | `--mode` | `-m` | Scan mode (`passive` / `active` / `full`) | `full` | `--mode passive` |
+| `--port` | `-p` | Focus on a specific port for scanning and exploitation | | `--port 21` |
 | `--output` | `-o` | Path to output directory | `./scans/` | `--output ./my_scans/` |
 | `--interactive` | `-i` | Request confirmation before proceeding to next step | `False` | `--interactive` |
 | `--gpt` | | Use GPT-4 for recommendations (requires API key) | `False` | `--gpt` |
@@ -107,6 +112,7 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
 |-------|-------|-------|----------------|-------|
 | `--target` | `-t` | כתובת IP או דומיין של המטרה | (חובה) | `--target example.com` |
 | `--mode` | `-m` | מצב סריקה (`passive` / `active` / `full`) | `full` | `--mode passive` |
+| `--port` | `-p` | התמקדות בפורט ספציפי לסריקה ולניצול | | `--port 21` |
 | `--output` | `-o` | נתיב לתיקיית הפלט | `./scans/` | `--output ./my_scans/` |
 | `--interactive` | `-i` | בקשת אישור לפני המשך לשלב הבא | `False` | `--interactive` |
 | `--gpt` | | שימוש ב-GPT-4 לקבלת המלצות (דורש מפתח API) | `False` | `--gpt` |
@@ -182,6 +188,11 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
    python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
    ```
 
+10. **Scan and exploit a specific port**:
+   ```bash
+   python redflow.py --target 10.0.2.4 --port 21
+   ```
+
 ---
 
 1. **ביצוע סריקה פסיבית בלבד** (ללא סריקת פורטים או תקיפה אקטיבית):
@@ -229,6 +240,11 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--output 
    python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
    ```
 
+10. **סריקה וניצול של פורט ספציפי**:
+   ```bash
+   python redflow.py --target 10.0.2.4 --port 21
+   ```
+
 ## New Features / תכונות חדשות
 
 ### File Discovery and Download / גילוי והורדת קבצים
@@ -273,6 +289,8 @@ The tool now integrates with searchsploit to find and exploit vulnerabilities:
 - **Vulnerability detection**: Automatically detects vulnerabilities in discovered services.
 - **Exploit search**: Searches for exploits using searchsploit based on service version information.
 - **Interactive exploit menu**: Provides an interactive menu to select and exploit vulnerabilities.
+- **Custom search options**: Allows users to enter custom search terms when looking for exploits.
+- **Exploit selection**: Displays a numbered list of available exploits for easy selection.
 - **Exploit preparation**: Automatically prepares exploits for execution by copying and configuring them.
 
 ***
@@ -280,6 +298,8 @@ The tool now integrates with searchsploit to find and exploit vulnerabilities:
 - **זיהוי פגיעויות**: מזהה באופן אוטומטי פגיעויות בשירותים שהתגלו.
 - **חיפוש מנגנוני ניצול**: מחפש מנגנוני ניצול באמצעות searchsploit בהתבסס על מידע גרסת השירות.
 - **תפריט ניצול אינטראקטיבי**: מספק תפריט אינטראקטיבי לבחירה וניצול פגיעויות.
+- **אפשרויות חיפוש מותאמות אישית**: מאפשר למשתמשים להזין מונחי חיפוש מותאמים אישית בעת חיפוש אחר exploits.
+- **בחירת exploit**: מציג רשימה ממוספרת של exploits זמינים לבחירה קלה.
 - **הכנת מנגנוני ניצול**: מכין באופן אוטומטי מנגנוני ניצול להרצה על ידי העתקה והגדרה שלהם.
 
 #### Instructions / הוראות שימוש:
@@ -296,6 +316,42 @@ python redflow.py --search-exploits apache:2.4.7
 
 # Exploit a specific service / ניצול שירות ספציפי
 python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
+
+# Scan and focus exploitation on a specific port / סריקה ומיקוד ניצול על פורט ספציפי
+python redflow.py --target 10.0.2.4 --port 21
+```
+
+### Port-Focused Scanning and Exploitation / סריקה וניצול ממוקדי-פורט
+
+RedFlow now supports port-focused scanning and exploitation, allowing you to:
+RedFlow כעת תומך בסריקה וניצול ממוקדי-פורט, המאפשרים לך:
+
+- **Target specific ports**: Focus on a particular port for faster and more efficient scanning
+- **Automatic exploitation flow**: Automatically move to the exploitation phase after discovering a specific port is open
+- **Interactive exploit selection**: Choose from available exploits for the identified service on the specified port
+- **Service-specific enumeration**: Run only the enumeration modules relevant to the service on the specified port
+
+***
+
+- **מיקוד בפורטים ספציפיים**: התמקדות בפורט מסוים לסריקה מהירה ויעילה יותר
+- **זרימת ניצול אוטומטית**: מעבר אוטומטי לשלב הניצול לאחר גילוי שפורט ספציפי פתוח
+- **בחירת exploit אינטראקטיבית**: בחירה מתוך exploits זמינים עבור השירות שזוהה בפורט שצוין
+- **תשאול ספציפי לשירות**: הפעלת רק מודולי התשאול הרלוונטיים לשירות בפורט שצוין
+
+#### Examples / דוגמאות
+
+```bash
+# Scan and focus on FTP service (port 21)
+# סריקה והתמקדות בשירות FTP (פורט 21)
+python redflow.py --target 10.0.2.4 --port 21
+
+# Scan and focus on HTTP service (port 80)
+# סריקה והתמקדות בשירות HTTP (פורט 80)
+python redflow.py --target 10.0.2.4 --port 80 --interactive
+
+# Scan and focus on SSH service (port 22)
+# סריקה והתמקדות בשירות SSH (פורט 22)
+python redflow.py --target 10.0.2.4 --port 22
 ```
 
 ## GUI Interface / ממשק GUI

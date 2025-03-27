@@ -40,15 +40,21 @@ class ActiveRecon:
             "nmap_vulns": []
         }
     
-    def run(self):
+    def run(self, specific_port=None):
         """
         Run all active scanning tasks
         // הפעלת כל הסריקות האקטיביות
         
+        Args:
+            specific_port (int, optional): Specific port to scan
+            
         Returns:
             Active scanning results
         """
         self.logger.info(f"Starting active scan for {self.target}")
+        
+        # Save specific port to class for use in other methods
+        self.specific_port = specific_port
         
         # Create progress display
         with Progress(
@@ -59,7 +65,11 @@ class ActiveRecon:
             console=self.console
         ) as progress:
             # First do a quick scan to identify open ports
-            quick_scan_task = progress.add_task("[cyan]Performing quick port scan...", total=1)
+            if specific_port:
+                quick_scan_task = progress.add_task(f"[cyan]Scanning port {specific_port}...", total=1)
+            else:
+                quick_scan_task = progress.add_task("[cyan]Performing quick port scan...", total=1)
+                
             self._perform_quick_portscan()
             progress.update(quick_scan_task, completed=1)
             
@@ -94,11 +104,20 @@ class ActiveRecon:
             "-sS",                           # SYN Scan
             "-T4",                           # Aggressive timing
             "--min-rate", "1000",            # Minimum rate of packets
-            "-p-",                           # All ports
+        ]
+        
+        # If specific port is provided, only scan that port
+        if hasattr(self, 'specific_port') and self.specific_port:
+            self.logger.info(f"Limiting scan to port {self.specific_port}")
+            command.extend(["-p", str(self.specific_port)])
+        else:
+            command.append("-p-")  # All ports
+            
+        command.extend([
             "--open",                        # Only show open ports
             "-oX", quick_scan_output,        # XML output
             self.target
-        ]
+        ])
         
         # Run Nmap with timeout
         scan_results = run_tool(command, self.logger, timeout=900)
