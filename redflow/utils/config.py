@@ -28,6 +28,7 @@ class Config:
         self.use_gpt = args.use_gpt
         self.verbose = args.verbose
         self.scan_vulns = getattr(args, 'scan_vulns', True)  # Default to True if not provided
+        self.gpt_model = getattr(args, 'gpt_model', 'gpt-4o-mini')  # Get GPT model from args or default to gpt-4o-mini
         
         # Project directory paths // נתיבים לתיקיות הפרויקט
         self.scans_dir = os.path.join(self.output_dir, "scans")
@@ -125,9 +126,12 @@ class Config:
         # GPT-related settings // הגדרות הקשורות ל-GPT
         self.gpt_settings = {
             "api_key": os.environ.get("OPENAI_API_KEY", ""),  # Default from environment
-            "model": "gpt-4",
-            "temperature": 0.7,
-            "max_tokens": 1000,
+            "model": self.gpt_model,  # Use the model specified in args or default
+            "temperature": 0.3,  # Lower temperature for more focused results
+            "max_tokens": 500,  # Enough for detailed exploit guidance
+            "top_p": 1.0,  # Default value for standard probability distribution
+            "frequency_penalty": 0.0,  # No penalty for term repetition (good for commands)
+            "presence_penalty": 0.0,  # No penalty for introducing new topics
             "custom_prompt": "",  # Custom user prompt
             "system_prompt": """You are an advanced Offensive Security expert and red team operator.
 
@@ -198,7 +202,7 @@ Output your response like you're advising an elite red teamer in the middle of a
             extension: File extension
             
         Returns:
-            Full path to the output file
+            Path to output file
         """
         return os.path.join(self.scans_dir, f"{tool_name}_{self.target}.{extension}")
     
@@ -275,17 +279,44 @@ Output your response like you're advising an elite red teamer in the middle of a
         """
         self.gpt_settings["custom_prompt"] = prompt
     
-    def get_gpt_prompt(self):
+    def get_gpt_prompt(self) -> str:
         """
-        Returns the complete prompt for GPT
-        // מחזיר את הפרומפט המלא ל-GPT
+        Returns the GPT prompt to use for analysis
+        // מחזיר את הפרומפט לשימוש עבור GPT לצורך אנליזה
         
         Returns:
-            Complete prompt composed of the system prompt and custom prompt
+            System prompt string
         """
-        system_prompt = self.gpt_settings["system_prompt"]
-        custom_prompt = self.gpt_settings["custom_prompt"]
+        # Use custom prompt if it exists, otherwise use the system prompt
+        return self.gpt_settings.get("custom_prompt") or self.gpt_settings.get("system_prompt", "")
+    
+    def get_gpt_api_key(self) -> str:
+        """
+        Returns the OpenAI API key from settings, environment variables or keyfile
+        // מחזיר את מפתח ה-API של OpenAI מההגדרות, משתני סביבה או קובץ מפתח
         
-        if custom_prompt:
-            return f"{system_prompt}\n\n{custom_prompt}"
-        return system_prompt 
+        Returns:
+            API key string or None if not found
+        """
+        # Check settings first
+        api_key = self.gpt_settings.get('api_key')
+        if api_key and len(api_key) > 10:
+            return api_key
+            
+        # Check environment variable
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if api_key and len(api_key) > 10:
+            return api_key
+            
+        # Check for key file in home directory
+        key_file = os.path.expanduser('~/.openai_api_key')
+        if os.path.exists(key_file):
+            try:
+                with open(key_file, 'r') as f:
+                    api_key = f.read().strip()
+                if api_key and len(api_key) > 10:
+                    return api_key
+            except Exception:
+                pass
+                
+        return None 

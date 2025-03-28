@@ -74,6 +74,14 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--gpt-model",
+        dest="gpt_model",
+        choices=["gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"],
+        default="gpt-4o-mini",
+        help="Specify which GPT model to use for analysis (default: gpt-4o-mini)"
+    )
+    
+    parser.add_argument(
         "--verbose", "-v",
         dest="verbose",
         action="store_true",
@@ -178,6 +186,14 @@ def parse_args():
         dest="run_msfconsole",
         action="store_true",
         help="Start Metasploit console directly and optionally target a specific IP"
+    )
+    
+    # Add new argument for GPT exploit advisor
+    exploit_operations.add_argument(
+        "--gpt-advisor",
+        dest="gpt_advisor",
+        action="store_true",
+        help="Use GPT to analyze and suggest exploits for detected services"
     )
     
     # Add new argument for interactive menu
@@ -328,7 +344,7 @@ def handle_exploit_operations(args, logger, console):
     
     # Determine target from results dir if not provided
     target = args.target
-    if not target and not args.run_msfconsole:
+    if not target and not args.run_msfconsole and not args.gpt_advisor:
         metadata_file = os.path.join(args.results_dir, "metadata.json")
         if os.path.exists(metadata_file):
             import json
@@ -339,7 +355,7 @@ def handle_exploit_operations(args, logger, console):
             except:
                 pass
     
-    if not target and not args.run_msfconsole:
+    if not target and not args.run_msfconsole and not args.gpt_advisor:
         logger.error("Target not specified and could not be determined from scan results")
         console.print("[bold red]Target not specified and could not be determined from scan results[/bold red]")
         return
@@ -367,6 +383,31 @@ def handle_exploit_operations(args, logger, console):
     
     # Set target for enumeration
     enumeration.target = target
+    
+    # Check if we want to use the GPT exploit advisor
+    if args.gpt_advisor:
+        # Import the GPT exploit advisor
+        try:
+            from redflow.modules.gpt.exploit_advisor import ExploitAdvisor
+            
+            console.print(f"[bold green]Starting GPT Exploit Advisor[/bold green]")
+            
+            # Initialize the advisor
+            advisor = ExploitAdvisor(config, logger, console)
+            
+            # Run the interactive advisor
+            advisor.interactive_exploit_advisor(found_services)
+            
+            return
+        except ImportError as e:
+            logger.error(f"Error importing GPT Exploit Advisor: {e}")
+            console.print("[bold red]Error: Could not import GPT Exploit Advisor module[/bold red]")
+            console.print("[bold yellow]Make sure you have all required dependencies installed[/bold yellow]")
+            return
+        except Exception as e:
+            logger.error(f"Error running GPT Exploit Advisor: {e}")
+            console.print(f"[bold red]Error running GPT Exploit Advisor: {e}[/bold red]")
+            return
     
     # Check if we want to run msfconsole directly
     if args.run_msfconsole:
@@ -598,6 +639,58 @@ def interactive_menu():
     gpt = console.input("[green]Use GPT for analysis (requires API key)? (y/n): [/green]").lower()
     args.use_gpt = gpt.startswith("y")
     
+    # GPT Exploit Advisor
+    gpt_advisor = console.input("[green]Enable GPT Exploit Advisor for vulnerability assessment? (y/n): [/green]").lower()
+    args.gpt_advisor = gpt_advisor.startswith("y")
+    
+    # Ask for OpenAI API key if either GPT option is enabled
+    if args.use_gpt or args.gpt_advisor:
+        # Check if API key already exists
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        key_file = os.path.expanduser('~/.openai_api_key')
+        
+        if os.path.exists(key_file):
+            with open(key_file, 'r') as f:
+                saved_key = f.read().strip()
+                if saved_key and len(saved_key) > 10:
+                    api_key = saved_key
+        
+        if not api_key or len(api_key) < 10:
+            console.print("\n[bold cyan]OpenAI API Key Setup[/bold cyan]")
+            console.print("[yellow]An OpenAI API key is required for GPT analysis.[/yellow]")
+            api_key = console.input("[green]Enter your OpenAI API key: [/green]").strip()
+            
+            if api_key and len(api_key) > 10:
+                # Ask if they want to save it
+                save_key = console.input("[green]Save this API key for future use? (y/n): [/green]").lower()
+                if save_key.startswith("y"):
+                    with open(key_file, 'w') as f:
+                        f.write(api_key)
+                    console.print("[green]API key saved to ~/.openai_api_key[/green]")
+                
+                # Set environment variable for current session
+                os.environ["OPENAI_API_KEY"] = api_key
+            else:
+                console.print("[bold red]Invalid API key. GPT features may not work correctly.[/bold red]")
+        
+        # GPT model selection
+        console.print("\n[bold cyan]GPT Model Selection[/bold cyan]")
+        console.print("[white]Available models:[/white]")
+        console.print("  [white]1[/white]: gpt-4o-mini (Recommended - fast, cost-effective)")
+        console.print("  [white]2[/white]: gpt-4 (More capable but slower and more expensive)")
+        console.print("  [white]3[/white]: gpt-3.5-turbo (Legacy model, less capable)")
+        
+        model_selection = console.input("[green]Choose GPT model [1-3] (default: 1): [/green]")
+        
+        if model_selection == "2":
+            args.gpt_model = "gpt-4"
+        elif model_selection == "3":
+            args.gpt_model = "gpt-3.5-turbo"
+        else:
+            args.gpt_model = "gpt-4o-mini"  # Default to gpt-4o-mini
+            
+        console.print(f"[green]Selected model: {args.gpt_model}[/green]")
+    
     # Output directory
     default_output = "./scans/"
     output_dir = console.input(f"[green]Enter output directory (default: {default_output}): [/green]")
@@ -627,6 +720,7 @@ def interactive_menu():
     console.print(f"Interactive Mode: [white]{'Enabled' if args.interactive else 'Disabled'}[/white]")
     console.print(f"Verbose Output: [white]{'Enabled' if args.verbose else 'Disabled'}[/white]")
     console.print(f"GPT Analysis: [white]{'Enabled' if args.use_gpt else 'Disabled'}[/white]")
+    console.print(f"GPT Exploit Advisor: [white]{'Enabled' if args.gpt_advisor else 'Disabled'}[/white]")
     console.print(f"Output Directory: [white]{args.output}[/white]")
     
     # Confirm and return
@@ -674,7 +768,7 @@ def main():
             return
             
         # Exploit operations
-        if args.exploit_menu or args.search_exploits or args.service_to_exploit or args.port_to_exploit or args.run_msfconsole:
+        if args.exploit_menu or args.search_exploits or args.service_to_exploit or args.port_to_exploit or args.run_msfconsole or args.gpt_advisor:
             handle_exploit_operations(args, default_logger, Console())
             return
         

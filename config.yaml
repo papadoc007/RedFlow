@@ -1,0 +1,54 @@
+# RedFlow Configuration File // קובץ תצורה של RedFlow
+
+# Tool paths - adjust if needed for your system // נתיבי כלים - התאם במידת הצורך למערכת שלך
+tools:
+  nmap: /usr/bin/nmap
+  gobuster: /usr/bin/gobuster
+  searchsploit: /usr/bin/searchsploit
+  metasploit: /usr/bin/msfconsole
+  hydra: /usr/bin/hydra
+  enum4linux: /usr/bin/enum4linux
+  theHarvester: /usr/bin/theHarvester
+  sublist3r: /usr/bin/sublist3r
+  whatweb: /usr/bin/whatweb
+  wafw00f: /usr/bin/wafw00f
+
+# GPT settings // הגדרות GPT
+gpt:
+  # Add your OpenAI API key here or in ~/.openai_api_key // הוסף את מפתח ה-API של OpenAI כאן או ב-~/.openai_api_key
+  api_key: ""
+  model: "gpt-4o-mini"  # Options: gpt-4o-mini, gpt-4, gpt-3.5-turbo // אפשרויות: gpt-4o-mini, gpt-4, gpt-3.5-turbo
+  temperature: 0.3      # Controls randomness (0.0-1.0)
+  max_tokens: 500       # Maximum token limit for responses
+  top_p: 1.0            # Nucleus sampling threshold
+  frequency_penalty: 0.0  # Penalize tokens based on frequency
+  presence_penalty: 0.0   # Penalize tokens based on presence
+  # Custom system prompt (leave empty to use default) // פרומפט מערכת מותאם אישית (השאר ריק לשימוש בברירת מחדל)
+  custom_prompt: "" 
+
+# Wordlists // רשימות מילים
+wordlists:
+  dirb_common: /usr/share/wordlists/dirb/common.txt
+  dirbuster_medium: /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
+  rockyou: /usr/share/wordlists/rockyou.txt
+  usernames: /usr/share/seclists/Usernames/top-usernames-shortlist.txt
+
+# Scanning settings // הגדרות סריקה
+scanning:
+  nmap_default_args: "-sV -A"
+  gobuster_threads: 10
+  max_scan_depth: 3
+  timeout: 300
+  
+# Exploit settings // הגדרות ניצול
+exploitation:
+  metasploit_auto_detect: true
+  auto_update_searchsploit: true
+  exploitdb_path: /usr/share/exploitdb
+  max_exploits_to_suggest: 10
+  
+# File operations // פעולות קבצים
+file_operations:
+  extensions_to_download: [".txt", ".php", ".html", ".xml", ".conf", ".bak", ".old", ".sql", ".db"]
+  max_file_size: 10485760  # 10MB
+  recursive_depth: 3 
