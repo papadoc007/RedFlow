@@ -240,10 +240,28 @@ def handle_file_operations(args, logger, console):
         target_dirs = []
         
         if os.path.exists(scans_base):
+            # First check for the new directory structure (organized by target)
             for dirname in os.listdir(scans_base):
                 full_path = os.path.join(scans_base, dirname)
-                if os.path.isdir(full_path) and "RedFlow_" in dirname:
-                    target_dirs.append((full_path, os.path.getmtime(full_path)))
+                
+                if os.path.isdir(full_path):
+                    # Check if this is a target-specific directory (not a traditional scan results folder)
+                    if not dirname.startswith("RedFlow_"):
+                        # Look for the latest scan in this target directory
+                        target_scan_dirs = []
+                        for scan_name in os.listdir(full_path):
+                            scan_path = os.path.join(full_path, scan_name)
+                            if os.path.isdir(scan_path) and scan_name.startswith("RedFlow_"):
+                                target_scan_dirs.append((scan_path, os.path.getmtime(scan_path)))
+                        
+                        # Get the most recent scan for this target
+                        if target_scan_dirs:
+                            target_scan_dirs.sort(key=lambda x: x[1], reverse=True)
+                            newest_scan_path, mod_time = target_scan_dirs[0]
+                            target_dirs.append((newest_scan_path, mod_time))
+                    else:
+                        # This is a traditional scan results directory
+                        target_dirs.append((full_path, os.path.getmtime(full_path)))
         
         if target_dirs:
             # Sort by creation time (newest first)
@@ -262,7 +280,9 @@ def handle_file_operations(args, logger, console):
     temp_args.output = args.results_dir
     temp_args.interactive = False
     temp_args.use_gpt = False
-    temp_args.verbose = args.verbose
+    temp_args.verbose = getattr(args, 'verbose', False)  # Safely get verbose flag
+    temp_args.scan_vulns = getattr(args, 'scan_vulns', True)  # Safely get scan_vulns flag
+    temp_args.gpt_model = getattr(args, 'gpt_model', 'gpt-4o-mini')  # Safely get model
     
     config = Config(temp_args, args.results_dir)
     
@@ -304,17 +324,17 @@ def handle_file_operations(args, logger, console):
     enumeration.target = target
     
     # Handle the file operations
-    if args.list_files:
+    if getattr(args, 'list_files', False):
         enumeration.list_discovered_files(target, args.port, args.protocol)
     
-    if args.interactive_download:
+    if getattr(args, 'interactive_download', False):
         console.print(f"[bold green]Interactive file download for {target}:[/bold green]")
         enumeration.interactive_download_files(target, args.port, args.protocol)
     
-    if args.download_url:
+    if getattr(args, 'download_url', None):
         enumeration.download_file(args.download_url)
     
-    if args.view_url:
+    if getattr(args, 'view_url', None):
         enumeration.view_web_file_content(url=args.view_url)
 
 def handle_exploit_operations(args, logger, console):
@@ -332,10 +352,28 @@ def handle_exploit_operations(args, logger, console):
         target_dirs = []
         
         if os.path.exists(scans_base):
+            # First check for the new directory structure (organized by target)
             for dirname in os.listdir(scans_base):
                 full_path = os.path.join(scans_base, dirname)
-                if os.path.isdir(full_path) and "RedFlow_" in dirname:
-                    target_dirs.append((full_path, os.path.getmtime(full_path)))
+                
+                if os.path.isdir(full_path):
+                    # Check if this is a target-specific directory (not a traditional scan results folder)
+                    if not dirname.startswith("RedFlow_"):
+                        # Look for the latest scan in this target directory
+                        target_scan_dirs = []
+                        for scan_name in os.listdir(full_path):
+                            scan_path = os.path.join(full_path, scan_name)
+                            if os.path.isdir(scan_path) and scan_name.startswith("RedFlow_"):
+                                target_scan_dirs.append((scan_path, os.path.getmtime(scan_path)))
+                        
+                        # Get the most recent scan for this target
+                        if target_scan_dirs:
+                            target_scan_dirs.sort(key=lambda x: x[1], reverse=True)
+                            newest_scan_path, mod_time = target_scan_dirs[0]
+                            target_dirs.append((newest_scan_path, mod_time))
+                    else:
+                        # This is a traditional scan results directory
+                        target_dirs.append((full_path, os.path.getmtime(full_path)))
         
         if target_dirs:
             # Sort by creation time (newest first)
@@ -354,7 +392,9 @@ def handle_exploit_operations(args, logger, console):
     temp_args.output = args.results_dir
     temp_args.interactive = False
     temp_args.use_gpt = False
-    temp_args.verbose = args.verbose
+    temp_args.verbose = getattr(args, 'verbose', False)  # Safely get verbose flag
+    temp_args.scan_vulns = getattr(args, 'scan_vulns', True)  # Safely get scan_vulns flag
+    temp_args.gpt_model = getattr(args, 'gpt_model', 'gpt-4o-mini')  # Safely get model
     
     config = Config(temp_args, args.results_dir)
     
@@ -363,7 +403,7 @@ def handle_exploit_operations(args, logger, console):
     
     # Determine target from results dir if not provided
     target = args.target
-    if not target and not args.run_msfconsole and not args.gpt_advisor:
+    if not target and not getattr(args, 'run_msfconsole', False) and not getattr(args, 'gpt_advisor', False):
         metadata_file = os.path.join(args.results_dir, "metadata.json")
         if os.path.exists(metadata_file):
             import json
@@ -374,7 +414,7 @@ def handle_exploit_operations(args, logger, console):
             except:
                 pass
     
-    if not target and not args.run_msfconsole and not args.gpt_advisor:
+    if not target and not getattr(args, 'run_msfconsole', False) and not getattr(args, 'gpt_advisor', False):
         logger.error("Target not specified and could not be determined from scan results")
         console.print("[bold red]Target not specified and could not be determined from scan results[/bold red]")
         return
@@ -404,7 +444,7 @@ def handle_exploit_operations(args, logger, console):
     enumeration.target = target
     
     # Check if we want to use the GPT exploit advisor
-    if args.gpt_advisor:
+    if getattr(args, 'gpt_advisor', False):
         # Import the GPT exploit advisor
         try:
             console.print(f"[bold green]Starting GPT Exploit Advisor[/bold green]")
@@ -490,7 +530,7 @@ def handle_exploit_operations(args, logger, console):
             os.environ["REDFLOW_TARGET"] = args.target if args.target else target if target else "127.0.0.1"
             
             # Set specific port if available
-            if args.specific_port and args.specific_port > 0:
+            if getattr(args, 'specific_port', None) and args.specific_port > 0:
                 os.environ["REDFLOW_SPECIFIC_PORT"] = str(args.specific_port)
                 logger.info(f"Setting specific port filter: {args.specific_port}")
                 
@@ -512,13 +552,13 @@ def handle_exploit_operations(args, logger, console):
             return
     
     # Check if we want to run msfconsole directly
-    if args.run_msfconsole:
+    if getattr(args, 'run_msfconsole', False):
         console.print(f"[bold green]Starting Metasploit Console{' targeting ' + target if target else ''}[/bold green]")
         enumeration.run_msfconsole(target)
         return
     
     # Check if we're searching for exploits for a specific service
-    if args.search_exploits:
+    if getattr(args, 'search_exploits', None):
         if ":" in args.search_exploits:
             service, version = args.search_exploits.split(":", 1)
             console.print(f"[bold green]Searching exploits for {service} {version}:[/bold green]")
@@ -528,7 +568,7 @@ def handle_exploit_operations(args, logger, console):
             return
     
     # Check if we're exploiting a specific service
-    elif args.service_to_exploit and args.port_to_exploit:
+    elif getattr(args, 'service_to_exploit', None) and getattr(args, 'port_to_exploit', None):
         service_type = None
         service_name = args.service_to_exploit
         version = ""
@@ -559,7 +599,7 @@ def handle_exploit_operations(args, logger, console):
         enumeration.interactive_exploit_menu(service_type, service_name, version, target)
     
     # Otherwise show exploit menu for all discovered services
-    elif args.exploit_menu:
+    elif getattr(args, 'exploit_menu', False):
         if not found_services:
             console.print("[bold yellow]No discovered services found in scan results.[/bold yellow]")
             console.print("Run a scan first with: python redflow.py --target TARGET --mode full")
@@ -669,6 +709,32 @@ def interactive_menu():
     # Create an empty args object
     args = argparse.Namespace()
     
+    # Initialize all possible attributes with default values to prevent errors
+    args.target = None
+    args.mode = "full"
+    args.output = "./scans/"
+    args.specific_port = None
+    args.port_range = None
+    args.interactive = False
+    args.use_gpt = False
+    args.verbose = False
+    args.scan_vulns = True
+    args.list_files = False
+    args.interactive_download = False
+    args.port = 80
+    args.protocol = "http"
+    args.download_url = None
+    args.view_url = None
+    args.results_dir = None
+    args.exploit_menu = False
+    args.search_exploits = None
+    args.port_to_exploit = None
+    args.service_to_exploit = None
+    args.run_msfconsole = False
+    args.gpt_advisor = False
+    args.interactive_menu = True
+    args.gpt_model = "gpt-4o-mini"
+    
     # Initial menu choice - new scan or use existing results
     console.print("[bold cyan]Main Menu:[/bold cyan]")
     console.print("[white]1[/white]: Start a new scan")
@@ -761,11 +827,18 @@ def interactive_menu():
                         if op_choice == "1":
                             args.list_files = True
                             args.interactive_download = True
-                            # Other options stay at default values
+                            args.verbose = False  # Set verbose flag explicitly
                         elif op_choice == "2":
                             args.exploit_menu = True
+                            args.list_files = False
+                            args.interactive_download = False
+                            args.verbose = False
                         elif op_choice == "3":
                             args.gpt_advisor = True
+                            args.use_gpt = True  # Make sure GPT is enabled
+                            args.list_files = False
+                            args.interactive_download = False
+                            args.verbose = False
                         else:
                             console.print("[bold red]Invalid choice. Returning to main menu.[/bold red]")
                             return interactive_menu()
@@ -927,22 +1000,6 @@ def interactive_menu():
             args.gpt_model = "gpt-4o-mini"  # Default to gpt-4o-mini
             
         console.print(f"[green]Selected model: {args.gpt_model}[/green]")
-    
-    # Initialize remaining required attributes with default values
-    args.scan_vulns = True
-    args.list_files = False
-    args.interactive_download = False
-    args.port = 80
-    args.protocol = "http"
-    args.download_url = None
-    args.view_url = None
-    args.results_dir = None
-    args.exploit_menu = False
-    args.search_exploits = None
-    args.port_to_exploit = None
-    args.service_to_exploit = None
-    args.run_msfconsole = False
-    args.interactive_menu = True
     
     # Display summary of selections
     console.print("\n[bold cyan]Configuration Summary:[/bold cyan]")
