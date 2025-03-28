@@ -69,18 +69,58 @@ def init_project_dir(target, base_output_dir="./scans/"):
         Path to project directory
     """
     # Clean target name for use as directory name
-    target_name = target.replace('.', '_').replace(':', '_')
+    clean_target = target.replace(':', '_').replace('/', '_').replace('\\', '_')
+    
+    # Create target-specific directory
+    target_dir = os.path.join(os.path.expanduser(base_output_dir), clean_target)
+    os.makedirs(target_dir, exist_ok=True)
+    
+    # Create timestamped directory for this scan
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    # Create unique directory name for target
-    project_name = f"RedFlow_{target_name}_{timestamp}"
-    project_dir = os.path.join(os.path.expanduser(base_output_dir), project_name)
-    
-    # Create relevant directories
+    project_dir = os.path.join(target_dir, f"RedFlow_{timestamp}")
     os.makedirs(project_dir, exist_ok=True)
-    os.makedirs(os.path.join(project_dir, "scans"), exist_ok=True)
-    os.makedirs(os.path.join(project_dir, "logs"), exist_ok=True)
-    os.makedirs(os.path.join(project_dir, "summaries"), exist_ok=True)
+    
+    # Create subdirectories
+    dirs = ["nmap", "exploits", "web", "vulns", "evidence", "screenshots", "loot", "logs", "summaries"]
+    for d in dirs:
+        os.makedirs(os.path.join(project_dir, d), exist_ok=True)
+    
+    # Create metadata file
+    metadata = {
+        "target": target,
+        "timestamp": timestamp,
+        "timestamp_human": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    
+    # Save metadata to JSON
+    with open(os.path.join(project_dir, "metadata.json"), 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    # Create a summary file
+    summary_path = os.path.join(project_dir, "summary.md")
+    with open(summary_path, 'w') as f:
+        f.write(f"# RedFlow Scan Summary for {target}\n\n")
+        f.write(f"**Date and Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write("## Open Ports\n\n")
+        f.write("| Port | Service | Version | Details |\n")
+        f.write("|------|---------|---------|--------|\n")
+        f.write("|      |         |         |        |\n\n")
+        f.write("## Findings\n\n")
+        f.write("*Scan in progress...*\n\n")
+        f.write("## Vulnerabilities\n\n")
+        f.write("*Scan in progress...*\n\n")
+    
+    # Create a symbolic link or reference file to the latest scan
+    latest_link = os.path.join(target_dir, "latest")
+    try:
+        # Try to use symbolic link (works on Unix)
+        if os.path.exists(latest_link):
+            os.unlink(latest_link)
+        os.symlink(project_dir, latest_link)
+    except Exception:
+        # Fall back to creating a file with the path (for Windows)
+        with open(os.path.join(target_dir, "latest.txt"), 'w') as f:
+            f.write(project_dir)
     
     console = Console()
     console.print(f"[bold green]Creating new project:[/bold green] {project_dir}")

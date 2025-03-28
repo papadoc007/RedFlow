@@ -46,11 +46,19 @@ def parse_args():
         help="Scan mode (passive, active, full, or quick - quick performs port scan and directory enumeration without vulnerability checks)"
     )
     
-    parser.add_argument(
+    # Make port argument consistent by accepting both --port/-p and --specific-port
+    port_group = parser.add_mutually_exclusive_group()
+    port_group.add_argument(
         "--port", "-p",
         dest="specific_port",
         type=int,
         help="Scan and focus on a specific port (e.g., 21 for FTP)"
+    )
+    port_group.add_argument(
+        "--specific-port",
+        dest="specific_port",
+        type=int,
+        help="Scan and focus on a specific port (alias for --port)"
     )
     
     parser.add_argument(
@@ -205,7 +213,17 @@ def parse_args():
         help="Launch interactive menu-driven interface"
     )
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    # Set environment variables for specific port if provided
+    if getattr(args, 'specific_port', None):
+        os.environ["REDFLOW_SPECIFIC_PORT"] = str(args.specific_port)
+    
+    # Set environment variable for target if provided
+    if getattr(args, 'target', None):
+        os.environ["REDFLOW_TARGET"] = args.target
+    
+    return args
 
 def handle_file_operations(args, logger, console):
     """
@@ -651,8 +669,123 @@ def interactive_menu():
     # Create an empty args object
     args = argparse.Namespace()
     
+    # Initial menu choice - new scan or use existing results
+    console.print("[bold cyan]Main Menu:[/bold cyan]")
+    console.print("[white]1[/white]: Start a new scan")
+    console.print("[white]2[/white]: Work with existing scan results")
+    
+    choice = console.input("[green]Choose an option [1-2]: [/green]")
+    
+    if choice == "2":
+        # Show existing scan directories
+        scans_base = "./scans/"
+        scan_dirs = []
+        
+        if os.path.exists(scans_base):
+            # First check if we have organized folders by target
+            for dirname in os.listdir(scans_base):
+                full_path = os.path.join(scans_base, dirname)
+                if os.path.isdir(full_path):
+                    # Check if this is a target folder (not a scan results folder)
+                    if not dirname.startswith("RedFlow_"):
+                        # This is likely a target folder, check for scan results inside
+                        target_scans = []
+                        for scan_dir in os.listdir(full_path):
+                            scan_path = os.path.join(full_path, scan_dir)
+                            if os.path.isdir(scan_path) and "RedFlow_" in scan_dir:
+                                scan_time = os.path.getmtime(scan_path)
+                                target_scans.append((scan_path, scan_time, f"{dirname}/{scan_dir}"))
+                        
+                        # Add the most recent scan for this target if any exist
+                        if target_scans:
+                            target_scans.sort(key=lambda x: x[1], reverse=True)
+                            scan_dirs.append((target_scans[0][0], target_scans[0][1], target_scans[0][2]))
+                    else:
+                        # This is a traditional scan results folder
+                        scan_time = os.path.getmtime(full_path)
+                        scan_dirs.append((full_path, scan_time, dirname))
+            
+            # Sort by time (newest first)
+            scan_dirs.sort(key=lambda x: x[1], reverse=True)
+            
+            if scan_dirs:
+                console.print("\n[bold cyan]Available scan results:[/bold cyan]")
+                for i, (path, time, name) in enumerate(scan_dirs, 1):
+                    # Try to get target from metadata
+                    target = "Unknown"
+                    metadata_file = os.path.join(path, "metadata.json")
+                    if os.path.exists(metadata_file):
+                        try:
+                            import json
+                            with open(metadata_file, 'r') as f:
+                                metadata = json.load(f)
+                                target = metadata.get("target", "Unknown")
+                        except:
+                            pass
+                    
+                    # Show scan info
+                    from datetime import datetime
+                    scan_date = datetime.fromtimestamp(time).strftime('%Y-%m-%d %H:%M:%S')
+                    console.print(f"[white]{i}[/white]: {name} - Target: [cyan]{target}[/cyan] - Date: {scan_date}")
+                
+                selection = console.input("\n[green]Select a scan directory (number) or 'b' to go back: [/green]")
+                
+                if selection.lower() == 'b':
+                    # Go back to main menu (recursive call)
+                    return interactive_menu()
+                
+                try:
+                    idx = int(selection) - 1
+                    if 0 <= idx < len(scan_dirs):
+                        args.results_dir = scan_dirs[idx][0]
+                        
+                        # Try to extract target from metadata
+                        metadata_file = os.path.join(args.results_dir, "metadata.json")
+                        if os.path.exists(metadata_file):
+                            try:
+                                import json
+                                with open(metadata_file, 'r') as f:
+                                    metadata = json.load(f)
+                                    args.target = metadata.get("target")
+                            except:
+                                pass
+                        
+                        # Show operations menu for existing scan
+                        console.print("\n[bold cyan]Operations menu:[/bold cyan]")
+                        console.print("[white]1[/white]: View scan results and files")
+                        console.print("[white]2[/white]: Exploit discovered vulnerabilities")
+                        console.print("[white]3[/white]: Run GPT Exploit Advisor")
+                        
+                        op_choice = console.input("[green]Choose an operation [1-3]: [/green]")
+                        
+                        if op_choice == "1":
+                            args.list_files = True
+                            args.interactive_download = True
+                            # Other options stay at default values
+                        elif op_choice == "2":
+                            args.exploit_menu = True
+                        elif op_choice == "3":
+                            args.gpt_advisor = True
+                        else:
+                            console.print("[bold red]Invalid choice. Returning to main menu.[/bold red]")
+                            return interactive_menu()
+                        
+                        return args
+                    else:
+                        console.print("[bold red]Invalid selection.[/bold red]")
+                        return interactive_menu()
+                except ValueError:
+                    console.print("[bold red]Invalid input. Please enter a number.[/bold red]")
+                    return interactive_menu()
+            else:
+                console.print("[bold yellow]No existing scan results found.[/bold yellow]")
+                console.print("[bold yellow]Starting a new scan instead.[/bold yellow]")
+        else:
+            console.print("[bold yellow]No existing scan results found.[/bold yellow]")
+            console.print("[bold yellow]Starting a new scan instead.[/bold yellow]")
+    
     # Step 1: Target Selection
-    console.print("[bold cyan]Step 1: Target Selection[/bold cyan]")
+    console.print("\n[bold cyan]Step 1: Target Selection[/bold cyan]")
     target_type = console.input("[green]Choose target type ([white]1[/white]: IP Address, [white]2[/white]: Domain): [/green]")
     
     if target_type == "1":
@@ -672,9 +805,13 @@ def interactive_menu():
     
     args.target = target
     
+    # Create a well-organized output directory based on the target
+    clean_target = args.target.replace(':', '_').replace('/', '_').replace('\\', '_')
+    args.output = f"./scans/{clean_target}/"
+    
     # Step 2: Port Selection
     console.print("\n[bold cyan]Step 2: Port Selection[/bold cyan]")
-    port_option = console.input("[green]Choose port option ([white]1[/white]: Specific port, [white]2[/white]: All ports): [/green]")
+    port_option = console.input("[green]Choose port option ([white]1[/white]: Specific port, [white]2[/white]: Range of ports, [white]3[/white]: All ports): [/green]")
     
     if port_option == "1":
         while True:
@@ -687,8 +824,24 @@ def interactive_menu():
                     console.print("[red]Port must be between 1 and 65535.[/red]")
             except ValueError:
                 console.print("[red]Please enter a valid number.[/red]")
+    elif port_option == "2":
+        # This will be handled by setting a custom nmap command in Config
+        start_port = console.input("[green]Enter start port: [/green]")
+        end_port = console.input("[green]Enter end port: [/green]")
+        try:
+            start_port_int = int(start_port)
+            end_port_int = int(end_port)
+            if 1 <= start_port_int <= 65535 and 1 <= end_port_int <= 65535:
+                args.port_range = f"{start_port}-{end_port}"
+            else:
+                console.print("[red]Ports must be between 1 and 65535. Using all ports.[/red]")
+                args.port_range = None
+        except ValueError:
+            console.print("[red]Invalid port range. Using all ports.[/red]")
+            args.port_range = None
     else:
         args.specific_port = None
+        args.port_range = None
     
     # Step 3: Scan Mode
     console.print("\n[bold cyan]Step 3: Scan Mode[/bold cyan]")
@@ -775,11 +928,6 @@ def interactive_menu():
             
         console.print(f"[green]Selected model: {args.gpt_model}[/green]")
     
-    # Output directory
-    default_output = "./scans/"
-    output_dir = console.input(f"[green]Enter output directory (default: {default_output}): [/green]")
-    args.output = output_dir if output_dir else default_output
-    
     # Initialize remaining required attributes with default values
     args.scan_vulns = True
     args.list_files = False
@@ -799,7 +947,10 @@ def interactive_menu():
     # Display summary of selections
     console.print("\n[bold cyan]Configuration Summary:[/bold cyan]")
     console.print(f"Target: [white]{args.target}[/white]")
-    console.print(f"Port: [white]{args.specific_port if args.specific_port else 'All ports'}[/white]")
+    if hasattr(args, 'port_range') and args.port_range:
+        console.print(f"Port Range: [white]{args.port_range}[/white]")
+    else:
+        console.print(f"Port: [white]{args.specific_port if args.specific_port else 'All ports'}[/white]")
     console.print(f"Scan Mode: [white]{args.mode}[/white]")
     console.print(f"Interactive Mode: [white]{'Enabled' if args.interactive else 'Disabled'}[/white]")
     console.print(f"Verbose Output: [white]{'Enabled' if args.verbose else 'Disabled'}[/white]")
