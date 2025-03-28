@@ -82,6 +82,14 @@ class Config:
             "usernames": "/usr/share/seclists/Usernames/top-usernames-shortlist.txt"
         }
         
+        # Default exploitation settings
+        self.exploitation = {
+            "metasploit_auto_detect": True,
+            "auto_update_searchsploit": True,
+            "exploitdb_path": "/usr/share/exploitdb",
+            "max_exploits_to_suggest": 10
+        }
+        
         # Settings for different tools // הגדרות עבור כלים שונים
         self.tool_settings = {
             "nmap": {
@@ -171,6 +179,18 @@ Output your response like you're advising an elite red teamer in the middle of a
                         # Update tool paths
                         if 'tools' in config_data:
                             self.tool_paths.update(config_data['tools'])
+                            
+                        # Update exploitation settings
+                        if 'exploitation' in config_data:
+                            self.exploitation = config_data['exploitation']
+                        else:
+                            # Default exploitation settings
+                            self.exploitation = {
+                                "metasploit_auto_detect": True,
+                                "auto_update_searchsploit": True,
+                                "exploitdb_path": "/usr/share/exploitdb",
+                                "max_exploits_to_suggest": 10
+                            }
             except Exception as e:
                 print(f"Error loading configuration file: {str(e)}")
     
