@@ -20,14 +20,15 @@ from redflow.modules.enumeration import Enumeration
 from redflow.utils.logger import setup_logger
 from redflow.utils.config import Config
 from redflow.utils.helpers import check_requirements, init_project_dir
+from redflow.modules.gpt.exploit_advisor import ExploitAdvisor
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 def parse_args():
     """Function to process command-line arguments // פונקציה לעיבוד פרמטרים מהמשתמש"""
     parser = argparse.ArgumentParser(
-        description="RedFlow - Advanced Automated Information Gathering and Attack Tool",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="RedFlow - Vulnerability Assessment and Penetration Testing Automation Suite",
+        epilog="Example: python redflow.py --target example.com --mode full"
     )
     
     parser.add_argument(
@@ -388,9 +389,87 @@ def handle_exploit_operations(args, logger, console):
     if args.gpt_advisor:
         # Import the GPT exploit advisor
         try:
-            from redflow.modules.gpt.exploit_advisor import ExploitAdvisor
-            
             console.print(f"[bold green]Starting GPT Exploit Advisor[/bold green]")
+            
+            # Set up environment for GPT - ensure use_gpt is enabled
+            temp_args.use_gpt = True
+            config.use_gpt = True
+            
+            # Check for OpenAI API key and request if needed
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+            key_file = os.path.expanduser('~/.openai_api_key')
+            config_yaml = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+            
+            # Check for API key in various locations
+            if os.path.exists(key_file):
+                try:
+                    with open(key_file, 'r') as f:
+                        saved_key = f.read().strip()
+                        if saved_key and len(saved_key) > 10:
+                            api_key = saved_key
+                            os.environ["OPENAI_API_KEY"] = api_key
+                            logger.info("Using API key from ~/.openai_api_key")
+                except Exception as e:
+                    logger.warning(f"Error reading API key file: {e}")
+                    
+            # Check config.yaml if key wasn't found in .openai_api_key
+            if not api_key and os.path.exists(config_yaml):
+                try:
+                    import yaml
+                    with open(config_yaml, 'r', encoding='utf-8') as f:
+                        config_data = yaml.safe_load(f)
+                        if config_data and 'gpt' in config_data and 'api_key' in config_data['gpt']:
+                            api_key = config_data['gpt']['api_key']
+                            if api_key and len(api_key) > 10:
+                                os.environ["OPENAI_API_KEY"] = api_key
+                                logger.info("Using API key from config.yaml")
+                except Exception as e:
+                    logger.warning(f"Error reading config.yaml: {e}")
+            
+            # If still no API key, request it from the user
+            if not api_key or len(api_key) < 10:
+                console.print("\n[bold cyan]OpenAI API Key Setup[/bold cyan]")
+                console.print("[yellow]An OpenAI API key is required for GPT Exploit Advisor.[/yellow]")
+                console.print("[yellow]You can get one from https://platform.openai.com/api-keys[/yellow]")
+                api_key = console.input("[green]Enter your OpenAI API key: [/green]").strip()
+                
+                if api_key and len(api_key) > 10:
+                    # Ask if they want to save it
+                    save_key = console.input("[green]Save this API key for future use? (y/n): [/green]").lower()
+                    if save_key.startswith("y"):
+                        with open(key_file, 'w') as f:
+                            f.write(api_key)
+                        console.print("[green]API key saved to ~/.openai_api_key[/green]")
+                        
+                        # Also try to update config.yaml if it exists
+                        if os.path.exists(config_yaml):
+                            try:
+                                import yaml
+                                with open(config_yaml, 'r', encoding='utf-8') as f:
+                                    config_data = yaml.safe_load(f) or {}
+                                
+                                if 'gpt' not in config_data:
+                                    config_data['gpt'] = {}
+                                
+                                config_data['gpt']['api_key'] = api_key
+                                
+                                with open(config_yaml, 'w', encoding='utf-8') as f:
+                                    yaml.dump(config_data, f, default_flow_style=False)
+                                    
+                                console.print("[green]API key also saved to config.yaml[/green]")
+                            except Exception as e:
+                                logger.warning(f"Error updating config.yaml: {e}")
+                    
+                    # Set in environment
+                    os.environ["OPENAI_API_KEY"] = api_key
+                    
+                    # Set in config for this session
+                    config.set_gpt_api_key(api_key)
+                else:
+                    console.print("[bold red]Invalid API key. GPT Exploit Advisor may not work correctly.[/bold red]")
+            
+            # Update global environment variable for target
+            os.environ["REDFLOW_TARGET"] = args.target if args.target else target if target else "127.0.0.1"
             
             # Initialize the advisor
             advisor = ExploitAdvisor(config, logger, console)
