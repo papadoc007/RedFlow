@@ -468,9 +468,14 @@ def handle_exploit_operations(args, logger, console):
                 else:
                     console.print("[bold red]Invalid API key. GPT Exploit Advisor may not work correctly.[/bold red]")
             
-            # Update global environment variable for target
+            # Update global environment variables
             os.environ["REDFLOW_TARGET"] = args.target if args.target else target if target else "127.0.0.1"
             
+            # Set specific port if available
+            if args.specific_port and args.specific_port > 0:
+                os.environ["REDFLOW_SPECIFIC_PORT"] = str(args.specific_port)
+                logger.info(f"Setting specific port filter: {args.specific_port}")
+                
             # Initialize the advisor
             advisor = ExploitAdvisor(config, logger, console)
             

@@ -371,7 +371,28 @@ Output your response like you're advising an elite red teamer in the middle of a
                 try:
                     with open(key_file, 'r') as f:
                         api_key = f.read().strip()
+                    if api_key and len(api_key) > 10:
+                        # If found, set it in environment and config
+                        os.environ["OPENAI_API_KEY"] = api_key
+                        self.gpt_settings["api_key"] = api_key
                 except Exception as e:
                     print(f"Error reading API key file: {e}")
+        
+        # If still not found, check config.yaml
+        if not api_key:
+            config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+            if os.path.exists(config_file):
+                try:
+                    import yaml
+                    with open(config_file, 'r', encoding='utf-8') as f:
+                        config_data = yaml.safe_load(f)
+                        if config_data and 'gpt' in config_data and 'api_key' in config_data['gpt']:
+                            api_key = config_data['gpt']['api_key']
+                            if api_key and len(api_key) > 10:
+                                # Set in environment and config
+                                os.environ["OPENAI_API_KEY"] = api_key
+                                self.gpt_settings["api_key"] = api_key
+                except Exception as e:
+                    print(f"Error reading config.yaml: {e}")
                     
         return api_key 
