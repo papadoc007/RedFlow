@@ -55,7 +55,6 @@ echo "[+] Setting up files..."
 # Set execution permissions
 echo "[+] Setting permissions..."
 chmod +x redflow.py
-chmod +x redflow_gui.py
 
 # בדיקת אם הכל הותקן בהצלחה
 # Verify installation
@@ -69,9 +68,6 @@ echo "Installation completed!"
 echo ""
 echo "To run RedFlow:"
 echo "  python3 redflow.py --target example.com"
-echo ""
-echo "To run RedFlow GUI:"
-echo "  python3 redflow_gui.py"
 echo ""
 echo "To set up your OpenAI API key for GPT Exploit Advisor:"
 echo "  echo 'YOUR_API_KEY' > ~/.openai_api_key"
